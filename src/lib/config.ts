@@ -23,7 +23,6 @@ export interface GlobalOpts {
   format?: 'json' | 'csv' | 'markdown'
   verbose?: boolean
   chart?: boolean
-  compare?: boolean
 }
 
 /**

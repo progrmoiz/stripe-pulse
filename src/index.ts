@@ -48,7 +48,6 @@ Examples:
   .option('--format <type>', 'Output format: json, csv, or markdown')
   .option('--verbose', 'Show extended output with additional metrics')
   .option('--chart', 'Show ASCII chart where available')
-  .option('--compare <period>', 'Compare against a prior period (e.g. 30d, 90d)')
 
 // Helper to read global opts from the root program at action time.
 function getGlobalOpts(): GlobalOpts {
@@ -62,7 +61,6 @@ function getGlobalOpts(): GlobalOpts {
     format?: string
     verbose?: boolean
     chart?: boolean
-    compare?: string
   }
   return {
     apiKey: opts.apiKey,
@@ -74,7 +72,6 @@ function getGlobalOpts(): GlobalOpts {
     format: opts.format as GlobalOpts['format'],
     verbose: opts.verbose,
     chart: opts.chart,
-    compare: opts.compare !== undefined,
   }
 }
 
