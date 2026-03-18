@@ -1,0 +1,61 @@
+{
+  "name": "stripe-pulse",
+  "version": "0.1.0",
+  "description": "Your Stripe metrics in one command. Vital signs for your SaaS.",
+  "type": "module",
+  "bin": {
+    "stripe-pulse": "./dist/cli.cjs"
+  },
+  "files": [
+    "dist/cli.cjs",
+    "SKILL.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "@commander-js/extra-typings": "^14.0.0",
+    "@clack/prompts": "^0.9.0",
+    "picocolors": "^1.1.0",
+    "stripe": "^17.0.0",
+    "simple-ascii-chart": "^5.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "esbuild": "^0.25.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "keywords": [
+    "stripe",
+    "mrr",
+    "saas",
+    "metrics",
+    "cli",
+    "churn",
+    "arpu",
+    "ltv",
+    "nrr",
+    "analytics",
+    "dashboard",
+    "saas-metrics",
+    "recurring-revenue"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/progrmoiz/stripe-pulse.git"
+  },
+  "homepage": "https://github.com/progrmoiz/stripe-pulse",
+  "bugs": {
+    "url": "https://github.com/progrmoiz/stripe-pulse/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
