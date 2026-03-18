@@ -452,6 +452,38 @@ stripe-pulse doctor --json
 # Returns: { "ok": true/false, "checks": [...] }
 ```
 
+### Export to CSV
+```bash
+stripe-pulse mrr --format csv
+# Returns: CSV with Metric,Value,Currency headers
+
+stripe-pulse active --format csv
+# Returns: CSV with Email,Name,Plan,MRR,Since headers — pipe to file for export
+stripe-pulse active --format csv > customers.csv
+```
+
+### Export to Markdown (for investor updates)
+```bash
+stripe-pulse dashboard --format markdown
+# Returns: markdown table of all metrics — paste into docs/emails
+
+stripe-pulse movements --format markdown
+# Returns: markdown table of MRR movements
+```
+
+### View MRR Trend Chart
+```bash
+stripe-pulse mrr --chart
+# Returns: 6-month reconstructed MRR trend line chart + sparkline + movements waterfall
+# Shows: ASCII line chart, growth/churn bars, net change with % arrow
+```
+
+### View Plan Breakdown Chart
+```bash
+stripe-pulse plans --chart
+# Returns: horizontal bar chart of revenue by plan, sorted by MRR descending
+```
+
 ---
 
 ## Best Practices for AI Agents
@@ -475,3 +507,7 @@ stripe-pulse doctor --json
 - **LTV**: `ARPU / monthlyChurnRate`. Returns `null` if churn rate is 0 (infinite LTV).
 - **Benchmarks** shown in human output are context strings only (e.g., "Good (2-8%)") — they are NOT included in JSON output.
 - All currency values are in the account's primary currency (usually USD). `currency` field is always lowercase (e.g., `"usd"`).
+- **MRR breakdown** is coupon-aware: discounts are distributed proportionally across plan items, so breakdown total matches the top-level MRR.
+- **Historical MRR** (via `--chart`): Reconstructed from subscription created/canceled timestamps. Uses current pricing — does not reflect historical price changes or mid-cycle upgrades. Approximate but directionally accurate.
+- **Restricted keys** (`rk_live_*`, `rk_test_*`): Supported. Product names are resolved via a separate `products.list` call; if the key lacks product read access, price IDs are shown as fallback.
+- **Customers vs Subscriptions**: The `customers` command counts unique customers (a customer with 2 subscriptions = 1 customer). The `dashboard` and `mrr` commands count subscriptions (same customer = 2). Both are correct — different measures.

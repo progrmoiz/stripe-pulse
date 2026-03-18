@@ -3,7 +3,7 @@
 ```
   ╭─╮
 ──╯ ╰──╮ ╭──   stripe-pulse v0.1.0
-        ╰─╯
+       ╰─╯
 ```
 
 **Your Stripe metrics in one command. Vital signs for your SaaS.**
@@ -119,9 +119,18 @@ Every command supports multiple output formats:
 | `--format csv` | CSV (pipe-friendly) |
 | `--format markdown` | Markdown table |
 | `--verbose` | Extended output with additional context |
-| `--chart` | ASCII chart where available |
+| `--chart` | MRR trend line chart + movements waterfall, plan breakdown bars |
 
 **Auto-JSON:** When stdout is piped (not a TTY), JSON mode is automatic. No flag needed.
+
+**`--chart` example:**
+```bash
+stripe-pulse mrr --chart
+# Shows: 6-month MRR trend line, sparkline, movements waterfall with growth %
+
+stripe-pulse plans --chart
+# Shows: horizontal bar chart of revenue by plan
+```
 
 ```bash
 # These all output JSON
@@ -166,9 +175,10 @@ Quick      2.8    ✓ Healthy (>1)
 These are reference strings only. They don't appear in `--json` output. The raw numbers are always in the JSON for you to interpret.
 
 Benchmark ranges used:
-- **Churn**: Excellent <2% · Good 2-5% · Moderate 5-8% · High >8%
-- **NRR**: Excellent >120% · Good 100-120% · At Risk <100%
-- **Quick Ratio**: Excellent >4 · Good 2-4 · Healthy 1-2 · Struggling <1
+- **Churn**: Excellent <3% · Good 3-5% · Median 5-7% · Above average 7-10% · High >10%
+- **NRR**: Best-in-class >130% · Strong 110-130% · Healthy ≥100% · Shrinking <100% · Critical <90%
+- **Quick Ratio**: Very healthy >4 · Good 2-4 · Fragile 1-2 · Losing <1
+- **Revenue Churn**: Excellent <2% · Average 2-5% · Needs attention >5%
 
 ---
 
@@ -184,6 +194,8 @@ Auth chain (highest priority first):
 1. `--api-key <key>` flag
 2. `STRIPE_API_KEY` environment variable
 3. Saved profile in credentials file
+
+Supports both full API keys (`sk_live_*`, `sk_test_*`) and restricted keys (`rk_live_*`, `rk_test_*`).
 
 ---
 
