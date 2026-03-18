@@ -65,6 +65,7 @@ That's it. Your SaaS metrics are live.
 |---------|-------------|
 | `login` | Save a Stripe API key (interactive) |
 | `logout` | Remove saved credentials |
+| `switch <profile>` | Switch the active profile |
 | `whoami` | Show current profile and account |
 | `doctor` | Run diagnostic checks |
 
@@ -150,7 +151,11 @@ stripe-pulse supports named profiles for managing multiple Stripe accounts:
 stripe-pulse login --profile personal
 stripe-pulse login --profile company
 
-# Query a specific account
+# Switch the active profile
+stripe-pulse switch personal
+stripe-pulse switch company
+
+# Query a specific account (without switching)
 stripe-pulse mrr --profile personal
 stripe-pulse dashboard --profile company
 

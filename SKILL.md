@@ -92,6 +92,7 @@ Returns every metric in one call: `mrr`, `arr`, `activeSubscribers`, `arpu`, `cu
 | `login` | Save Stripe API key (interactive) |
 | `login --key sk_xxx --profile name` | Non-interactive login |
 | `logout` | Remove credentials |
+| `switch <profile>` | Switch active profile |
 | `whoami --json` | Show profile, masked key, mode |
 | `doctor --json` | Diagnostic checks (version, node, API key, connection) |
 
