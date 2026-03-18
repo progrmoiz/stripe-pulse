@@ -36,6 +36,11 @@ npm install -g stripe-pulse
 stripe-pulse --version
 ```
 
+**Agent skill (Claude Code, Cursor, etc.):**
+```bash
+npx skills add progrmoiz/stripe-pulse
+```
+
 > Requires Node.js >= 20
 
 ---
