@@ -221,7 +221,12 @@ The `dashboard` command is the most efficient call — it batches all API reques
 
 stripe-pulse is designed for AI agent use. Every command outputs clean JSON, every error has a structured format, and exit codes are consistent.
 
-See [SKILL.md](SKILL.md) for the complete agent reference: all schemas, common workflows, and best practices for programmatic use.
+**Install the agent skill:**
+```bash
+npx skills add progrmoiz/stripe-pulse
+```
+
+This installs the [SKILL.md](SKILL.md) into your AI agent (Claude Code, Cursor, etc.) so it knows how to use stripe-pulse automatically.
 
 ```bash
 # Check MRR in a script or AI workflow
