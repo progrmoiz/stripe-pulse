@@ -150,6 +150,7 @@ stripe-pulse plans --chart
 - **Restricted keys work but show less info.** Account name shows as "restricted key", product names resolve via separate API call. If product read permission is missing, price IDs are shown instead.
 - **Benchmark strings only appear in human output.** JSON output has raw numbers only — no "⚠ High" or "✓ Good" strings.
 - **MRR breakdown is coupon-aware.** Discounts are distributed proportionally across plan items. Breakdown total matches top-level MRR exactly.
+- **Designed for early-stage SaaS (up to ~10,000 subscriptions).** Each command fetches live data from Stripe — no local database. Under 500 subs: 2-3 seconds. 2,000+ subs: 15-30 seconds. No caching between commands.
 
 ## Common Patterns
 

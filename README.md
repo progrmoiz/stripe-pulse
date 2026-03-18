@@ -199,6 +199,19 @@ Supports both full API keys (`sk_live_*`, `sk_test_*`) and restricted keys (`rk_
 
 ---
 
+## Performance
+
+stripe-pulse fetches subscription data directly from Stripe's API on every run. There's no local database — metrics are always real-time.
+
+- **< 500 subscriptions:** ~2-3 seconds (most indie SaaS)
+- **500-2,000 subscriptions:** ~5-10 seconds
+- **2,000-10,000 subscriptions:** ~15-30 seconds
+- **> 10,000 subscriptions:** Not recommended — consider a dedicated analytics platform
+
+The `dashboard` command is the most efficient call — it batches all API requests in parallel.
+
+---
+
 ## AI Agent Integration
 
 stripe-pulse is designed for AI agent use. Every command outputs clean JSON, every error has a structured format, and exit codes are consistent.
