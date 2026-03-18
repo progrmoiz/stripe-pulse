@@ -1,513 +1,182 @@
-# stripe-pulse — AI Agent Skill
-
-## Tool Overview
-
-`stripe-pulse` is a CLI that turns your Stripe account into a real-time SaaS metrics dashboard. It calculates MRR, ARR, churn, LTV, NRR, quick ratio, MRR movements, and more — directly from your Stripe subscriptions.
-
-- **npm**: `npx stripe-pulse` (no install) or `npm install -g stripe-pulse`
-- **Node.js**: >= 20 required
-- **Config directory**: `~/.config/stripe-pulse/`
-
 ---
+name: stripe-pulse
+description: "Check Stripe SaaS metrics from the terminal. Use when you need MRR, churn, LTV, NRR, ARPU, customer counts, MRR movements, or a full dashboard. Triggers on 'check MRR', 'what's our churn', 'stripe metrics', 'how many customers', 'revenue breakdown', 'export metrics', or any Stripe analytics question. Runs `stripe-pulse` CLI commands and parses JSON output."
+---
+
+# stripe-pulse — Stripe SaaS Metrics CLI
+
+Get MRR, ARR, churn, LTV, NRR, quick ratio, MRR movements, and more — directly from Stripe subscriptions.
+
+**Install:** `npm install -g stripe-pulse`
+**Quick check:** `stripe-pulse mrr --json`
+**Everything at once:** `stripe-pulse dashboard --json`
+
+## When to Use
+
+- User asks about MRR, revenue, churn, customers, or any SaaS metric
+- Updating pulse.md or state files that track MRR
+- Running freshness guards that check Stripe data
+- User wants to export metrics (CSV, markdown, JSON)
+- User says "check stripe", "what's our MRR", "how's churn looking"
+- Comparing metrics across profiles/accounts
+
+## Quick Start
+
+```bash
+# First time: authenticate
+stripe-pulse login
+
+# Check MRR
+stripe-pulse mrr --json
+# → { "mrr": 392, "arr": 4704, "currency": "usd", "activeSubscriptions": 18, "breakdown": [...] }
+
+# Full dashboard (most efficient — one call, all metrics)
+stripe-pulse dashboard --json
+# → { "mrr": ..., "arr": ..., "churn": ..., "ltv": ..., "nrr": ..., ... }
+```
 
 ## Authentication
 
-stripe-pulse uses a three-tier auth chain (highest priority wins):
+Three-tier auth chain (highest priority wins):
 
 1. `--api-key <key>` flag on any command
 2. `STRIPE_API_KEY` environment variable
-3. Credentials file at `~/.config/stripe-pulse/credentials.json` (set via `stripe-pulse login`)
+3. Credentials file at `~/.config/stripe-pulse/credentials.json`
 
-For multi-account setups, use named profiles:
-- `stripe-pulse login --profile production`
-- `stripe-pulse mrr --profile production`
-- `STRIPE_PULSE_PROFILE=production stripe-pulse mrr`
+Multi-account: `stripe-pulse mrr --profile activecalculator --json`
 
-The active profile is stored in the credentials file and can be switched per-command with `--profile`.
+Supports full keys (`sk_live_*`, `sk_test_*`) and restricted keys (`rk_live_*`, `rk_test_*`).
 
----
+## Commands
 
-## All Commands
+### Single Metrics
+| Command | Returns | Key Fields |
+|---------|---------|------------|
+| `mrr --json` | MRR + breakdown | `mrr`, `arr`, `activeSubscriptions`, `breakdown[]` |
+| `arr --json` | Annual run rate | `arr`, `mrr` |
+| `customers --json` | Count by status | `activeSubscribers`, `trialingCustomers`, `pastDueCustomers` |
+| `arpu --json` | Avg revenue/user | `arpu` |
+| `ltv --json` | Lifetime value | `ltv`, `avgLifespanMonths`, `monthlyChurnRate` |
+| `plans --json` | Revenue by plan | `[{ productName, mrr, subscriptionCount, interval }]` |
+| `trials --json` | Trial conversion | `conversionRate`, `trialsStarted`, `trialsConverted` |
 
-### Auth Commands
+### Period Metrics (default: last 30 days)
+| Command | Returns | Key Fields |
+|---------|---------|------------|
+| `churn --json` | Customer churn % | `customerChurnRate`, `customersLost` |
+| `revenue-churn --json` | Revenue churn % | `revenueChurnRate`, `mrrLost` |
+| `nrr --json` | Net revenue retention | `nrr`, `expansionMrr`, `churnedMrr` |
+| `quick-ratio --json` | Growth efficiency | `quickRatio` (>4 excellent, >1 healthy) |
+| `movements --json` | MRR waterfall | `newMrr`, `expansionMrr`, `contractionMrr`, `churnedMrr`, `netNewMrr` |
 
-| Command | Description |
-|---------|-------------|
-| `login` | Authenticate with a Stripe API key (interactive prompt) |
-| `logout` | Remove saved credentials for the active profile |
-| `whoami` | Show the current profile and Stripe account info |
-| `doctor` | Run diagnostic checks on the CLI setup |
+Period flags: `--from 2026-01-01 --to 2026-01-31`
 
-### Core Metric Commands
+### Customer Lists
+| Command | Returns | Key Fields |
+|---------|---------|------------|
+| `new-customers --json` | New in period | `count`, `customers[].email`, `.mrr` |
+| `churned --json` | Churned in period | `count`, `customers[].email`, `.canceledAt` |
+| `active --json` | All active (by MRR desc) | `count`, `customers[].email`, `.mrr` |
 
-| Command | Description |
-|---------|-------------|
-| `mrr` | Monthly Recurring Revenue |
-| `arr` | Annual Recurring Revenue |
-| `customers` | Customer count by status (active, trialing, past due) |
-| `arpu` | Average Revenue Per User |
-| `ltv` | Customer Lifetime Value |
-| `plans` | Revenue breakdown by plan |
-| `trials` | Trial conversion metrics |
+### Dashboard (All-in-One)
+```bash
+stripe-pulse dashboard --json
+```
+Returns every metric in one call: `mrr`, `arr`, `activeSubscribers`, `arpu`, `customerChurnRate`, `revenueChurnRate`, `ltv`, `nrr`, `quickRatio`, `trialConversionRate`, `mrrByPlan[]`, `currency`, `dataAsOf`.
 
-### Period-Based Commands (support `--from` / `--to`)
+**This is the most efficient call.** Use it when you need multiple metrics — one API batch instead of many.
 
-| Command | Description |
-|---------|-------------|
-| `churn` | Customer churn rate for a period |
-| `revenue-churn` | Revenue (MRR) churn rate for a period |
-| `nrr` | Net Revenue Retention |
-| `quick-ratio` | SaaS Quick Ratio (growth quality) |
-| `movements` | MRR movement breakdown (new, expansion, contraction, churned, reactivation) |
-
-### Customer List Commands
-
-| Command | Description |
-|---------|-------------|
-| `new-customers` | List new customers in a period |
-| `churned` | List recently churned customers |
-| `active` | List all active customers |
-
-### Dashboard
-
-| Command | Description |
-|---------|-------------|
-| `dashboard` | Full SaaS metrics dashboard — all metrics in one command |
-
----
+### Auth & Diagnostics
+| Command | Purpose |
+|---------|---------|
+| `login` | Save Stripe API key (interactive) |
+| `login --key sk_xxx --profile name` | Non-interactive login |
+| `logout` | Remove credentials |
+| `whoami --json` | Show profile, masked key, mode |
+| `doctor --json` | Diagnostic checks (version, node, API key, connection) |
 
 ## Global Flags
 
-These flags work on every command:
-
-| Flag | Description |
-|------|-------------|
+| Flag | Effect |
+|------|--------|
+| `--json` | Force JSON output |
+| `--profile <name>` | Use specific Stripe account |
 | `--api-key <key>` | Override API key for this request |
-| `-p, --profile <name>` | Select credentials profile |
-| `--json` | Force JSON output (machine-readable) |
-| `-q, --quiet` | Suppress all stderr output, implies `--json` |
-| `--from <date>` | Start date for period queries (ISO 8601: YYYY-MM-DD) |
-| `--to <date>` | End date for period queries (ISO 8601: YYYY-MM-DD) |
-| `--format <type>` | Output format: `json`, `csv`, or `markdown` |
-| `--verbose` | Extended output with additional context |
-| `--chart` | Show ASCII chart where available |
-| `-v, --version` | Show version number |
+| `--from <date>` | Period start (YYYY-MM-DD) |
+| `--to <date>` | Period end (YYYY-MM-DD) |
+| `--format csv` | CSV output (for export) |
+| `--format markdown` | Markdown table (for docs/updates) |
+| `--verbose` | Extended output |
+| `--chart` | ASCII chart (MRR trend, plan bars) |
+| `--quiet` | Suppress stderr, implies --json |
 
----
+**Auto-JSON:** When stdout is piped (non-TTY), JSON is automatic. No `--json` needed.
 
-## JSON Output Schemas
+## Output Formats
 
-**Best practice: always use `--json` for machine consumption.** When stdout is piped (not a TTY), JSON mode is automatic.
+```bash
+# JSON (for parsing)
+stripe-pulse mrr --json
 
-### `mrr --json`
-```json
-{
-  "mrr": 2900.00,
-  "arr": 34800.00,
-  "currency": "usd",
-  "activeSubscriptions": 100,
-  "breakdown": [
-    {
-      "productId": "prod_xxx",
-      "productName": "Pro",
-      "priceId": "price_xxx",
-      "nickname": "Pro Monthly",
-      "interval": "month",
-      "mrr": 2900.00,
-      "subscriptionCount": 100
-    }
-  ]
-}
+# CSV (for spreadsheets)
+stripe-pulse active --format csv > customers.csv
+
+# Markdown (for investor updates)
+stripe-pulse dashboard --format markdown
+
+# Chart (MRR trend + movements waterfall)
+stripe-pulse mrr --chart
+
+# Plan breakdown chart
+stripe-pulse plans --chart
 ```
-
-### `arr --json`
-```json
-{
-  "arr": 34800.00,
-  "mrr": 2900.00,
-  "currency": "usd",
-  "activeSubscriptions": 100
-}
-```
-
-### `customers --json`
-```json
-{
-  "totalCustomers": 120,
-  "activeSubscribers": 100,
-  "trialingCustomers": 15,
-  "pastDueCustomers": 5
-}
-```
-
-### `arpu --json`
-```json
-{
-  "arpu": 29.00,
-  "mrr": 2900.00,
-  "activeSubscribers": 100,
-  "currency": "usd"
-}
-```
-
-### `ltv --json`
-```json
-{
-  "ltv": 290.00,
-  "arpu": 29.00,
-  "monthlyChurnRate": 10.0,
-  "avgLifespanMonths": 10.0,
-  "currency": "usd"
-}
-```
-
-### `plans --json`
-```json
-[
-  {
-    "productId": "prod_xxx",
-    "productName": "Pro",
-    "priceId": "price_xxx",
-    "nickname": "Pro Monthly",
-    "interval": "month",
-    "mrr": 2900.00,
-    "subscriptionCount": 100
-  }
-]
-```
-
-### `trials --json`
-```json
-{
-  "period": { "start": "2026-01-01", "end": "2026-03-18" },
-  "conversionRate": 72.5,
-  "trialsStarted": 40,
-  "trialsConverted": 29
-}
-```
-
-### `churn --json`
-```json
-{
-  "period": { "start": "2026-02-16", "end": "2026-03-18" },
-  "customerChurnRate": 5.2,
-  "customersAtStart": 96,
-  "customersLost": 5,
-  "currency": "usd"
-}
-```
-
-### `revenue-churn --json`
-```json
-{
-  "period": { "start": "2026-02-16", "end": "2026-03-18" },
-  "revenueChurnRate": 3.4,
-  "mrrAtStart": 2784.00,
-  "mrrLost": 94.00,
-  "currency": "usd"
-}
-```
-
-### `nrr --json`
-```json
-{
-  "period": { "start": "2026-02-16", "end": "2026-03-18" },
-  "nrr": 104.2,
-  "startingMrr": 2784.00,
-  "expansionMrr": 290.00,
-  "contractionMrr": 58.00,
-  "churnedMrr": 94.00,
-  "currency": "usd"
-}
-```
-
-### `quick-ratio --json`
-```json
-{
-  "quickRatio": 2.8,
-  "newMrr": 290.00,
-  "expansionMrr": 87.00,
-  "churnedMrr": 94.00,
-  "contractionMrr": 58.00,
-  "currency": "usd"
-}
-```
-
-### `movements --json`
-```json
-{
-  "period": { "start": "2026-02-16", "end": "2026-03-18" },
-  "newMrr": 290.00,
-  "expansionMrr": 87.00,
-  "contractionMrr": 58.00,
-  "churnedMrr": 94.00,
-  "reactivationMrr": 29.00,
-  "netNewMrr": 254.00,
-  "currency": "usd"
-}
-```
-
-### `new-customers --json` / `churned --json` / `active --json`
-```json
-{
-  "period": { "start": "2026-02-16", "end": "2026-03-18" },
-  "count": 10,
-  "totalMrr": 290.00,
-  "customers": [
-    {
-      "customerId": "cus_xxx",
-      "email": "user@example.com",
-      "name": "Jane Smith",
-      "subscriptionId": "sub_xxx",
-      "status": "active",
-      "plan": "Pro",
-      "interval": "month",
-      "mrr": 29.00,
-      "created": "2026-03-01",
-      "canceledAt": null,
-      "currency": "usd"
-    }
-  ]
-}
-```
-
-### `dashboard --json`
-```json
-{
-  "mrr": 2900.00,
-  "arr": 34800.00,
-  "activeSubscribers": 100,
-  "arpu": 29.00,
-  "customerChurnRate": 5.2,
-  "revenueChurnRate": 3.4,
-  "ltv": 290.00,
-  "nrr": 104.2,
-  "quickRatio": 2.8,
-  "trialConversionRate": 72.5,
-  "mrrByPlan": [
-    {
-      "productId": "prod_xxx",
-      "productName": "Pro",
-      "priceId": "price_xxx",
-      "nickname": "Pro Monthly",
-      "interval": "month",
-      "mrr": 2900.00,
-      "subscriptionCount": 100
-    }
-  ],
-  "currency": "usd",
-  "dataAsOf": "2026-03-18T12:00:00.000Z"
-}
-```
-
-### `doctor --json`
-```json
-{
-  "ok": true,
-  "checks": [
-    {
-      "name": "CLI Version",
-      "status": "pass",
-      "message": "v0.1.0"
-    },
-    {
-      "name": "Node.js",
-      "status": "pass",
-      "message": "v22.0.0",
-      "detail": "Meets minimum requirement (>=20)"
-    },
-    {
-      "name": "Config File",
-      "status": "pass",
-      "message": "Found",
-      "detail": "Active profile: default"
-    },
-    {
-      "name": "API Key",
-      "status": "pass",
-      "message": "Configured (sk_liv...wxyz)",
-      "detail": "Source: credentials file · Profile: default"
-    },
-    {
-      "name": "Stripe Connection",
-      "status": "pass",
-      "message": "Connected (312ms)",
-      "detail": "Account ID: acct_xxx"
-    },
-    {
-      "name": "Account Info",
-      "status": "pass",
-      "message": "Acme Corp",
-      "detail": "ID: acct_xxx"
-    }
-  ]
-}
-```
-
----
 
 ## Exit Codes
 
-| Code | Meaning | When |
-|------|---------|------|
-| `0` | Success | Command completed normally |
-| `1` | API error | Stripe API call failed, network error, calculation error |
-| `2` | Auth error | No API key configured, key invalid |
-| `3` | Validation error | Invalid date format, bad option value |
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | API error (Stripe call failed) |
+| `2` | Auth error (no key, invalid key) |
+| `3` | Validation error (bad date, bad option) |
 
----
+## Gotchas
 
-## Common Workflows
+- **Always use `--json` when parsing output.** Human output has ANSI colors and formatting that will break parsing. `--json` or piped stdout gives clean JSON.
+- **`dashboard --json` is more efficient than calling individual commands.** It fetches all data in one parallel batch. Don't call `mrr` + `churn` + `nrr` separately when `dashboard` gives all three.
+- **`customers` counts unique customers, `mrr` counts subscriptions.** A customer with 2 subscriptions = 1 customer but 2 in `activeSubscriptions`. Both correct, different measures.
+- **Historical MRR (`--chart`) is approximate.** Reconstructed from subscription timestamps using current pricing. Doesn't reflect past price changes or mid-cycle upgrades.
+- **Period defaults to last 30 days.** If you need a specific period, always pass `--from` and `--to` explicitly.
+- **Restricted keys work but show less info.** Account name shows as "restricted key", product names resolve via separate API call. If product read permission is missing, price IDs are shown instead.
+- **Benchmark strings only appear in human output.** JSON output has raw numbers only — no "⚠ High" or "✓ Good" strings.
+- **MRR breakdown is coupon-aware.** Discounts are distributed proportionally across plan items. Breakdown total matches top-level MRR exactly.
 
-### Check MRR
+## Common Patterns
+
+### Get a single number
 ```bash
-stripe-pulse mrr --json
-# Returns: { "mrr": 2900.00, "arr": 34800.00, ... }
-
 stripe-pulse mrr --json | jq .mrr
-# Returns: 2900
+# → 392
 ```
 
-### Get Full Dashboard
+### Check if churn is concerning
 ```bash
-stripe-pulse dashboard --json
-# Returns: complete SaasDashboard object with all metrics
+stripe-pulse churn --json | jq '.customerChurnRate > 10'
+# → true/false
 ```
 
-### Check Churn for a Specific Period
+### Get churned customer emails
 ```bash
-stripe-pulse churn --from 2026-01-01 --to 2026-01-31 --json
-# Returns: { "customerChurnRate": 4.2, "customersLost": 4, ... }
+stripe-pulse churned --json | jq -r '.customers[].email'
 ```
 
-### Check Revenue Churn
+### Compare two accounts
 ```bash
-stripe-pulse revenue-churn --from 2026-01-01 --to 2026-01-31 --json
+stripe-pulse mrr --profile activecalculator --json | jq .mrr
+stripe-pulse mrr --profile teamai --json | jq .mrr
 ```
 
-### List Churned Customers
+### Diagnose connection issues
 ```bash
-stripe-pulse churned --from 2026-01-01 --to 2026-01-31 --json
-# Returns: { "count": 4, "customers": [...] }
+stripe-pulse doctor --json | jq '.checks[] | select(.status == "fail")'
 ```
-
-### List New Customers
-```bash
-stripe-pulse new-customers --from 2026-01-01 --to 2026-01-31 --json
-```
-
-### Compare Plans
-```bash
-stripe-pulse plans --json
-# Returns: array of MrrByPlan objects sorted by MRR
-```
-
-### Check NRR
-```bash
-stripe-pulse nrr --from 2026-01-01 --to 2026-03-31 --json
-# Returns: { "nrr": 104.2, ... } — above 100 means expansion revenue
-```
-
-### Check Quick Ratio
-```bash
-stripe-pulse quick-ratio --json
-# Returns: { "quickRatio": 2.8, ... } — >4 is excellent, >1 is healthy
-```
-
-### Check MRR Movements
-```bash
-stripe-pulse movements --from 2026-02-01 --to 2026-02-28 --json
-# Returns: new/expansion/contraction/churn/reactivation breakdown
-```
-
-### Use with Multiple Accounts
-```bash
-# Login to two accounts
-stripe-pulse login --profile personal
-stripe-pulse login --profile company
-
-# Query each account
-stripe-pulse mrr --profile personal --json
-stripe-pulse mrr --profile company --json
-
-# Switch the default
-stripe-pulse login  # re-run to update default profile
-```
-
-### Pipe into jq
-```bash
-# Get just the MRR value
-stripe-pulse mrr --json | jq .mrr
-
-# Get dashboard and extract churn rate
-stripe-pulse dashboard --json | jq .customerChurnRate
-
-# Get customer list and filter by MRR
-stripe-pulse active --json | jq '.customers[] | select(.mrr > 100)'
-```
-
-### Diagnose Setup Issues
-```bash
-stripe-pulse doctor --json
-# Returns: { "ok": true/false, "checks": [...] }
-```
-
-### Export to CSV
-```bash
-stripe-pulse mrr --format csv
-# Returns: CSV with Metric,Value,Currency headers
-
-stripe-pulse active --format csv
-# Returns: CSV with Email,Name,Plan,MRR,Since headers — pipe to file for export
-stripe-pulse active --format csv > customers.csv
-```
-
-### Export to Markdown (for investor updates)
-```bash
-stripe-pulse dashboard --format markdown
-# Returns: markdown table of all metrics — paste into docs/emails
-
-stripe-pulse movements --format markdown
-# Returns: markdown table of MRR movements
-```
-
-### View MRR Trend Chart
-```bash
-stripe-pulse mrr --chart
-# Returns: 6-month reconstructed MRR trend line chart + sparkline + movements waterfall
-# Shows: ASCII line chart, growth/churn bars, net change with % arrow
-```
-
-### View Plan Breakdown Chart
-```bash
-stripe-pulse plans --chart
-# Returns: horizontal bar chart of revenue by plan, sorted by MRR descending
-```
-
----
-
-## Best Practices for AI Agents
-
-1. **Always use `--json`** for programmatic output. When stdout is piped (non-TTY), JSON mode is automatic.
-2. **Use `--quiet` (`-q`)** to suppress spinner/status output on stderr when you don't want any noise.
-3. **Use `--from` / `--to`** for period-based metrics. Default is the last 30 days.
-4. **Use `--profile`** to query a specific Stripe account without modifying the active profile.
-5. **Check exit codes** — non-zero exit means something went wrong; parse `stderr` for the error JSON when `--json` is set.
-6. **`doctor --json`** is the right first step when diagnosing auth or connectivity issues — it returns structured check results.
-7. **`dashboard --json`** is the single most efficient call — it fetches all data in one parallel batch and returns every metric.
-
----
-
-## Notes on Metric Calculations
-
-- **MRR**: Sum of monthly-normalized revenue from all active subscriptions. Annual subscriptions divided by 12.
-- **Churn rate**: `customersLost / customersAtStart * 100`. Period defaults to last 30 days.
-- **NRR**: `(startMRR + expansion - contraction - churn) / startMRR * 100`. Above 100% means growth.
-- **Quick Ratio**: `(newMRR + expansionMRR) / (churnedMRR + contractionMRR)`. Above 4 = excellent growth efficiency.
-- **LTV**: `ARPU / monthlyChurnRate`. Returns `null` if churn rate is 0 (infinite LTV).
-- **Benchmarks** shown in human output are context strings only (e.g., "Good (2-8%)") — they are NOT included in JSON output.
-- All currency values are in the account's primary currency (usually USD). `currency` field is always lowercase (e.g., `"usd"`).
-- **MRR breakdown** is coupon-aware: discounts are distributed proportionally across plan items, so breakdown total matches the top-level MRR.
-- **Historical MRR** (via `--chart`): Reconstructed from subscription created/canceled timestamps. Uses current pricing — does not reflect historical price changes or mid-cycle upgrades. Approximate but directionally accurate.
-- **Restricted keys** (`rk_live_*`, `rk_test_*`): Supported. Product names are resolved via a separate `products.list` call; if the key lacks product read access, price IDs are shown as fallback.
-- **Customers vs Subscriptions**: The `customers` command counts unique customers (a customer with 2 subscriptions = 1 customer). The `dashboard` and `mrr` commands count subscriptions (same customer = 2). Both are correct — different measures.
