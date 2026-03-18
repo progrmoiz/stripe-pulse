@@ -22,6 +22,7 @@ import { makeNewCustomersCommand } from './commands/new-customers.js'
 import { makeChurnedCommand } from './commands/churned.js'
 import { makeActiveCommand } from './commands/active.js'
 import { makeDashboardCommand } from './commands/dashboard.js'
+import { makeSwitchCommand } from './commands/switch.js'
 
 const program = new Command()
   .name(CLI_NAME)
@@ -78,6 +79,7 @@ function getGlobalOpts(): GlobalOpts {
 // Auth commands
 program.addCommand(makeLoginCommand(getGlobalOpts))
 program.addCommand(makeLogoutCommand(getGlobalOpts))
+program.addCommand(makeSwitchCommand(getGlobalOpts))
 
 // Utility commands
 program.addCommand(makeWhoamiCommand(getGlobalOpts))
