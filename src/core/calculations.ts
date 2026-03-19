@@ -90,6 +90,7 @@ function isTrialing(sub: Stripe.Subscription): boolean {
 /** Check whether a subscription should count toward MRR. */
 function isActiveForMrr(sub: Stripe.Subscription): boolean {
   if (isTrialing(sub)) return false;
+  if (sub.cancel_at_period_end) return false;
   return sub.status === "active" || sub.status === "past_due";
 }
 
@@ -274,7 +275,7 @@ export function calculateSubscriptionPlanMrr(
     );
   }
 
-  // Bug fix #3: Apply forever coupon discounts from discounts[] array
+  // Apply coupon discounts from discounts[] array (with singular fallback)
   const discounts: Array<string | Stripe.Discount> =
     subscription.discounts?.length
       ? subscription.discounts
@@ -282,15 +283,48 @@ export function calculateSubscriptionPlanMrr(
         ? [subscription.discount]
         : [];
 
+  // Determine the subscription's billing interval for amount_off normalization
+  const subInterval = subscription.items.data[0]?.price?.recurring?.interval ?? "month";
+  const subIntervalCount = subscription.items.data[0]?.price?.recurring?.interval_count ?? 1;
+  const nowTs = Math.floor(Date.now() / 1000);
+
+  // Apply percent_off first (compound), then amount_off — matches Stripe's behavior
   for (const d of discounts) {
     if (typeof d === "string") continue;
-    if (d?.coupon?.duration === "forever") {
-      const coupon = d.coupon;
-      if (coupon.percent_off) {
-        totalMonthlyCents *= 1 - coupon.percent_off / 100;
-      } else if (coupon.amount_off) {
-        totalMonthlyCents -= coupon.amount_off;
-      }
+    const coupon = d?.coupon;
+    if (!coupon) continue;
+
+    // Determine if this discount should apply to MRR:
+    // - forever: always applies
+    // - repeating: applies while discount is still active (end > now)
+    // - once: skip — non-recurring by definition
+    const shouldApply =
+      coupon.duration === "forever" ||
+      (coupon.duration === "repeating" && d.end && d.end > nowTs);
+    if (!shouldApply) continue;
+
+    if (coupon.percent_off) {
+      totalMonthlyCents *= 1 - coupon.percent_off / 100;
+    }
+  }
+  for (const d of discounts) {
+    if (typeof d === "string") continue;
+    const coupon = d?.coupon;
+    if (!coupon) continue;
+
+    const shouldApply =
+      coupon.duration === "forever" ||
+      (coupon.duration === "repeating" && d.end && d.end > nowTs);
+    if (!shouldApply) continue;
+
+    if (coupon.amount_off) {
+      // Normalize amount_off to monthly — it's applied per invoice,
+      // so a $500 discount on a yearly sub = $41.67/month reduction
+      totalMonthlyCents -= normalizeToMonthlyCents(
+        coupon.amount_off,
+        subInterval,
+        subIntervalCount,
+      );
     }
   }
 
