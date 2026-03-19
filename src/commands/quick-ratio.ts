@@ -33,24 +33,27 @@ export function makeQuickRatioCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [activeSubs, newSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, newSubs, canceledSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
             fetcher.getCanceledSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
+        const newIds = new Set(newSubs.map((s) => s.id))
         const previousSubs = [...activeSubs, ...canceledSubs].filter(
-          (sub) => !newSubs.find((n) => n.id === sub.id)
+          (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
         const result = calculateQuickRatio(
           movements.newMrr,
           movements.expansionMrr,
+          movements.reactivationMrr,
           movements.churnedMrr,
           movements.contractionMrr,
           movements.currency
@@ -67,6 +70,7 @@ export function makeQuickRatioCommand(globalOpts: () => GlobalOpts): Command {
             ['Quick Ratio', result.quickRatio === Infinity ? '∞' : result.quickRatio.toFixed(2)],
             ['New MRR', formatCurrency(result.newMrr, result.currency)],
             ['Expansion MRR', formatCurrency(result.expansionMrr, result.currency)],
+            ['Reactivation MRR', formatCurrency(result.reactivationMrr, result.currency)],
             ['Churned MRR', formatCurrency(result.churnedMrr, result.currency)],
             ['Contraction MRR', formatCurrency(result.contractionMrr, result.currency)],
           ]

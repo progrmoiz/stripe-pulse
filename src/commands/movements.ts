@@ -32,21 +32,23 @@ export function makeMovementsCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [activeSubs, newSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, newSubs, canceledSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
             fetcher.getCanceledSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
+        const newIds = new Set(newSubs.map((s) => s.id))
         const previousSubs = [...activeSubs, ...canceledSubs].filter(
-          (sub) => !newSubs.find((n) => n.id === sub.id)
+          (s) => !newIds.has(s.id)
         )
 
-        const result = calculateMrrMovements(activeSubs, previousSubs)
+        const result = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
         // Stamp the period on the result
         result.period = { start: startDate, end: endDate }
 
@@ -81,6 +83,20 @@ export function makeMovementsCommand(globalOpts: () => GlobalOpts): Command {
         process.stdout.write(`├─ Churned      ${pc.red(`-${formatCurrency(result.churnedMrr, cur)}`)}\n`)
         process.stdout.write(`├─ Reactivation ${pc.green(`+${formatCurrency(result.reactivationMrr, cur)}`)}\n`)
         process.stdout.write(`└─ Net          ${netColor(`${netSign}${formatCurrency(result.netNewMrr, cur)}`)}\n`)
+
+        if (result.reactivations.length > 0 && !opts.verbose) {
+          process.stdout.write(pc.dim(`Note: ${result.reactivations.length} subscription(s) reclassified as reactivation (use --verbose for details)\n`))
+        }
+
+        if (opts.verbose && result.reactivations.length > 0) {
+          process.stdout.write(`\nReactivations:\n`)
+          for (const r of result.reactivations) {
+            process.stdout.write(`  Customer: ${r.customerId}\n`)
+            process.stdout.write(`    Prior sub:    ${r.previousSubscriptionId}  canceled ${r.canceledAt}\n`)
+            process.stdout.write(`    New sub:      ${r.newSubscriptionId}  reactivated ${r.reactivatedAt}\n`)
+            process.stdout.write(`    MRR:          ${formatCurrency(r.mrrCents / 100, cur)}\n`)
+          }
+        }
       } catch (err) {
         outputError({ code: 'API', message: err instanceof Error ? err.message : 'Unknown error' }, opts)
         process.exit(ExitCode.API_ERROR)

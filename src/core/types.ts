@@ -6,6 +6,22 @@ export interface CacheEntry<T> {
   timestamp: number;
 }
 
+// ── Reactivation Types ─────────────────────────────────
+export interface ReactivationDetail {
+  customerId: string;
+  previousSubscriptionId: string;
+  newSubscriptionId: string;
+  canceledAt: string;      // ISO date of prior sub cancellation
+  reactivatedAt: string;   // ISO date of new sub creation
+  mrrCents: number;        // MRR of the new subscription in cents
+}
+
+export interface ClassificationResult {
+  trulyNew: Stripe.Subscription[];
+  reactivations: Stripe.Subscription[];
+  reactivationDetails: ReactivationDetail[];
+}
+
 // ── Fetched Data ───────────────────────────────────────
 export interface StripeData {
   subscriptions: Stripe.Subscription[];
@@ -39,6 +55,7 @@ export interface MrrMovements {
   churnedMrr: number;
   reactivationMrr: number;
   netNewMrr: number;
+  reactivations: ReactivationDetail[];  // details for JSON/verbose output
   currency: string;
 }
 
@@ -47,6 +64,7 @@ export interface ChurnResult {
   customerChurnRate: number;
   customersAtStart: number;
   customersLost: number;
+  reactivatedCustomers: number;  // customers who churned but resubscribed in period
   currency: string;
 }
 
@@ -101,6 +119,7 @@ export interface QuickRatioResult {
   quickRatio: number;
   newMrr: number;
   expansionMrr: number;
+  reactivationMrr: number;  // visible component in numerator
   churnedMrr: number;
   contractionMrr: number;
   currency: string;
@@ -117,6 +136,8 @@ export interface SaasDashboard {
   nrr: number | null;
   quickRatio: number | null;
   trialConversionRate: number | null;
+  reactivatedCustomers: number;          // NEW
+  reactivations: ReactivationDetail[];   // details for JSON output
   mrrByPlan: MrrByPlan[];
   currency: string;
   dataAsOf: string;
@@ -146,6 +167,8 @@ export interface FormattedCustomer {
 export interface CustomerListResult {
   period?: { start: string; end: string };
   count: number;
+  reactivatedCount?: number;           // NEW
+  reactivations?: ReactivationDetail[]; // NEW: full details for JSON output
   totalMrr?: number;
   customers: FormattedCustomer[];
 }

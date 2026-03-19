@@ -33,21 +33,23 @@ export function makeNrrCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [activeSubs, newSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, newSubs, canceledSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
             fetcher.getCanceledSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
+        const newIds = new Set(newSubs.map((s) => s.id))
         const previousSubs = [...activeSubs, ...canceledSubs].filter(
-          (sub) => !newSubs.find((n) => n.id === sub.id)
+          (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
         const startingMrr = calculatePeriodMrr(previousSubs)
         const result = calculateNetRevenueRetention(
           startingMrr,
@@ -85,6 +87,7 @@ export function makeNrrCommand(globalOpts: () => GlobalOpts): Command {
         if (opts.verbose) {
           process.stdout.write(`Starting MRR:   ${formatCurrency(result.startingMrr, result.currency)}\n`)
           process.stdout.write(`Expansion:      +${formatCurrency(result.expansionMrr, result.currency)}\n`)
+          process.stdout.write(`Reactivation:   +${formatCurrency(movements.reactivationMrr, movements.currency)}\n`)
           process.stdout.write(`Contraction:    -${formatCurrency(result.contractionMrr, result.currency)}\n`)
           process.stdout.write(`Churned:        -${formatCurrency(result.churnedMrr, result.currency)}\n`)
           process.stdout.write(`Period:         ${startDate} → ${endDate}\n`)

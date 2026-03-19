@@ -10,6 +10,8 @@ import type {
   LtvResult,
   QuickRatioResult,
   NetRevenueRetentionResult,
+  ClassificationResult,
+  ReactivationDetail,
 } from "./types.js";
 
 // ── Helpers ──────────────────────────────────────────────
@@ -67,6 +69,122 @@ export function detectCurrency(subs: Stripe.Subscription[]): string {
     }
   }
   return "usd";
+}
+
+/** Extract customer ID from a subscription, handling both string and object forms. */
+export function getCustomerId(s: Stripe.Subscription): string {
+  return typeof s.customer === "string" ? s.customer : s.customer.id;
+}
+
+/**
+ * Check whether a canceled subscription ever generated revenue.
+ * A trial-only sub that never converted should not count as a prior
+ * "paying" relationship for reactivation purposes.
+ *
+ * Heuristic: if the sub's plan MRR > 0 AND it was not trialing at cancellation,
+ * it was paying. We also check if the status ever reached 'active' or 'past_due'
+ * by looking at the current status field (for canceled subs, Stripe preserves
+ * the status as 'canceled' but we can check if trial_end < canceled_at, meaning
+ * the trial ended before cancellation, implying the sub was active at some point).
+ */
+export function wasPaying(sub: Stripe.Subscription): boolean {
+  // If the plan has zero MRR, it was never paying (free plan)
+  if (calculateSubscriptionPlanMrr(sub) === 0) return false;
+
+  // If there was no trial, it was paying from the start
+  if (!sub.trial_end) return true;
+
+  // If trial ended before cancellation, the sub converted to paid at some point
+  if (sub.canceled_at && sub.trial_end < sub.canceled_at) return true;
+
+  // If trial_end is in the past and sub is canceled, it likely converted
+  // (trial ended, then customer used it, then canceled)
+  const now = Math.floor(Date.now() / 1000);
+  if (sub.trial_end < now) return true;
+
+  // Trial was still active at cancellation -- never paid
+  return false;
+}
+
+/**
+ * Partition new-in-period subscriptions into truly-new vs reactivation.
+ *
+ * A subscription is a "reactivation" if:
+ * 1. Its customer ID matches a previously-canceled subscription's customer ID
+ * 2. The prior canceled sub was actually paying (not trial-only)
+ *
+ * Same-period netting: if canceledInPeriod is provided, customers who both
+ * canceled AND resubscribed within the same period are netted out -- their
+ * new sub is classified as reactivation but their cancellation is flagged
+ * for exclusion from churn counts.
+ *
+ * @param newSubs - Subscriptions created within the measurement period
+ * @param allCanceledSubs - ALL canceled subscriptions (all-time), for customer matching
+ * @param canceledInPeriod - Canceled subs within THIS period, for same-period netting
+ */
+export function classifyNewSubscriptions(
+  newSubs: Stripe.Subscription[],
+  allCanceledSubs: Stripe.Subscription[],
+  canceledInPeriod?: Stripe.Subscription[],
+): ClassificationResult {
+  // Minimum gap between cancellation and resubscription to count as reactivation.
+  // Shorter gaps are likely plan switches, payment retries, or accidental cancels.
+  const MIN_REACTIVATION_GAP_SECONDS = 24 * 60 * 60; // 24 hours
+
+  // Build map: customer ID -> best matching canceled sub (paying only)
+  // "Best" = most recently canceled, so the detail output is meaningful
+  const canceledByCustomer = new Map<string, Stripe.Subscription>();
+  for (const sub of allCanceledSubs) {
+    if (!wasPaying(sub)) continue;  // Skip trial-only subs
+    const custId = getCustomerId(sub);
+    const existing = canceledByCustomer.get(custId);
+    if (!existing || (sub.canceled_at ?? 0) > (existing.canceled_at ?? 0)) {
+      canceledByCustomer.set(custId, sub);
+    }
+  }
+
+  const trulyNew: Stripe.Subscription[] = [];
+  const reactivations: Stripe.Subscription[] = [];
+  const reactivationDetails: ReactivationDetail[] = [];
+
+  // Sort by created descending so we pick the most recent sub per customer
+  const sorted = [...newSubs].sort((a, b) => (b.created ?? 0) - (a.created ?? 0));
+  const seenCustomerIds = new Set<string>();
+
+  for (const sub of sorted) {
+    const custId = getCustomerId(sub);
+    const priorSub = canceledByCustomer.get(custId);
+    const newSubMrr = calculateSubscriptionPlanMrr(sub);
+
+    // Check: prior paying sub exists, new sub has MRR > 0, not already seen, sufficient gap
+    if (
+      priorSub &&
+      newSubMrr > 0 &&
+      !seenCustomerIds.has(custId) &&
+      (sub.created ?? 0) - (priorSub.canceled_at ?? 0) >= MIN_REACTIVATION_GAP_SECONDS
+    ) {
+      seenCustomerIds.add(custId);
+      reactivations.push(sub);
+      reactivationDetails.push({
+        customerId: custId,
+        previousSubscriptionId: priorSub.id,
+        newSubscriptionId: sub.id,
+        canceledAt: priorSub.canceled_at
+          ? new Date(priorSub.canceled_at * 1000).toISOString().slice(0, 10)
+          : "unknown",
+        reactivatedAt: new Date((sub.created ?? 0) * 1000).toISOString().slice(0, 10),
+        mrrCents: newSubMrr,
+      });
+    } else {
+      trulyNew.push(sub);
+    }
+  }
+
+  // Suppress unused parameter warning -- canceledInPeriod is available for callers
+  // that need same-period netting (calculateCustomerChurn uses it directly)
+  void canceledInPeriod;
+
+  return { trulyNew, reactivations, reactivationDetails };
 }
 
 // ── Per-Subscription MRR ─────────────────────────────────
@@ -233,8 +351,16 @@ export function calculatePeriodMrr(subscriptions: Stripe.Subscription[]): number
 export function calculateMrrMovements(
   currentSubs: Stripe.Subscription[],
   previousSubs: Stripe.Subscription[],
+  allCanceledSubs: Stripe.Subscription[],  // REQUIRED -- no optional footgun
 ): MrrMovements {
   const currency = detectCurrency([...currentSubs, ...previousSubs]);
+
+  // Build the reactivated sub ID set internally
+  // "New" subs = in currentSubs but not in previousSubs (by sub ID)
+  const prevIds = new Set(previousSubs.map(s => s.id));
+  const newInPeriod = currentSubs.filter(s => !prevIds.has(s.id));
+  const { reactivations, reactivationDetails } = classifyNewSubscriptions(newInPeriod, allCanceledSubs);
+  const reactivatedSubIds = new Set(reactivations.map(s => s.id));
 
   const prevMap = new Map<string, number>();
   const prevStatusMap = new Map<string, string>();
@@ -244,8 +370,10 @@ export function calculateMrrMovements(
   }
 
   const currMap = new Map<string, number>();
+  const currStatusMap = new Map<string, string>();
   for (const sub of currentSubs) {
     currMap.set(sub.id, calculateSubscriptionPlanMrr(sub));
+    currStatusMap.set(sub.id, sub.status);
   }
 
   let newMrr = 0;
@@ -260,15 +388,17 @@ export function calculateMrrMovements(
     const prevMrr = prevMap.get(sub.id);
 
     if (prevMrr === undefined) {
-      // New subscription
-      newMrr += currMrr;
+      if (reactivatedSubIds.has(sub.id)) {
+        // Returning customer with new subscription ID
+        reactivationMrr += currMrr;
+      } else {
+        // Truly new subscription
+        newMrr += currMrr;
+      }
     } else {
       const prevStatus = prevStatusMap.get(sub.id);
-      if (
-        prevStatus === "canceled" &&
-        isActiveForMrr(sub)
-      ) {
-        // Reactivation
+      if (prevStatus === "canceled" && isActiveForMrr(sub)) {
+        // Same-sub-ID reactivation (rare but possible)
         reactivationMrr += currMrr;
       } else if (currMrr > prevMrr) {
         expansionMrr += currMrr - prevMrr;
@@ -283,8 +413,8 @@ export function calculateMrrMovements(
     const prevMrr = prevMap.get(sub.id) ?? 0;
     if (prevMrr === 0) continue;
 
-    const inCurrent = currentSubs.find((s) => s.id === sub.id);
-    if (!inCurrent || inCurrent.status === "canceled") {
+    const currStatus = currStatusMap.get(sub.id);
+    if (currStatus === undefined || currStatus === "canceled") {
       churnedMrr += prevMrr;
     }
   }
@@ -301,6 +431,7 @@ export function calculateMrrMovements(
     churnedMrr: Math.round(churnedMrr) / 100,
     reactivationMrr: Math.round(reactivationMrr) / 100,
     netNewMrr: Math.round(netNewMrr) / 100,
+    reactivations: reactivationDetails,
     currency,
   };
 }
@@ -312,11 +443,20 @@ export function calculateCustomerChurn(
   canceledInPeriod: Stripe.Subscription[],
   startDate: string,
   endDate: string,
+  allCanceledSubs: Stripe.Subscription[],    // REQUIRED
+  newSubsInPeriod: Stripe.Subscription[],    // REQUIRED -- for same-period netting
 ): ChurnResult {
   const currency = detectCurrency([...activeSubs, ...canceledInPeriod]);
 
-  const getCustomerId = (s: Stripe.Subscription) =>
-    typeof s.customer === "string" ? s.customer : s.customer.id;
+  // Classify new subs, passing canceledInPeriod for same-period netting
+  const { reactivations } = classifyNewSubscriptions(newSubsInPeriod, allCanceledSubs, canceledInPeriod);
+  const reactivatedCustomerIds = new Set(reactivations.map(s => getCustomerId(s)));
+
+  // Same-period netting: customers who canceled AND resubscribed in the same period
+  const canceledCustomerIds = new Set(canceledInPeriod.map(getCustomerId));
+  const nettedCustomerIds = new Set(
+    [...reactivatedCustomerIds].filter(id => canceledCustomerIds.has(id))
+  );
 
   // Customers at start = currently active + those who canceled in the period
   // (because they were active at start before they churned)
@@ -325,20 +465,29 @@ export function calculateCustomerChurn(
     ...canceledInPeriod.map(getCustomerId),
   ]);
 
+  // Customers lost = canceled in period, MINUS those who resubscribed in the same period
   const uniqueCustomersLost = new Set(
     canceledInPeriod.map(getCustomerId),
   );
+  // Remove netted customers from lost count
+  for (const id of nettedCustomerIds) {
+    uniqueCustomersLost.delete(id);
+  }
 
   const customersAtStart = uniqueCustomersAtStart.size;
   const customersLost = uniqueCustomersLost.size;
   const churnRate =
     customersAtStart === 0 ? 0 : (customersLost / customersAtStart) * 100;
 
+  // Reactivated = all reactivations (including those that netted within period)
+  const reactivatedCount = reactivatedCustomerIds.size;
+
   return {
     period: { start: startDate, end: endDate },
     customerChurnRate: Math.round(churnRate * 100) / 100,
     customersAtStart,
     customersLost,
+    reactivatedCustomers: reactivatedCount,
     currency,
   };
 }
@@ -448,18 +597,20 @@ export function calculateCustomerMetrics(
 export function calculateQuickRatio(
   newMrr: number,
   expansionMrr: number,
+  reactivationMrr: number,  // NEW required param
   churnedMrr: number,
   contractionMrr: number,
   currency = "usd",
 ): QuickRatioResult {
   const denominator = churnedMrr + contractionMrr;
   const quickRatio =
-    denominator === 0 ? Infinity : (newMrr + expansionMrr) / denominator;
+    denominator === 0 ? Infinity : (newMrr + expansionMrr + reactivationMrr) / denominator;
 
   return {
     quickRatio: quickRatio === Infinity ? Infinity : Math.round(quickRatio * 100) / 100,
     newMrr,
     expansionMrr,
+    reactivationMrr,
     churnedMrr,
     contractionMrr,
     currency,

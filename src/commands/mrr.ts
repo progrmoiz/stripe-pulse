@@ -83,11 +83,10 @@ export function makeMrrCommand(globalOpts: () => GlobalOpts): Command {
           // ── 2. Movements Waterfall ──
           const now = new Date()
           const newIds = new Set(newSubs.map(s => s.id))
-          const previousSubs = [
-            ...subs.filter(s => !newIds.has(s.id)),
-            ...canceledInPeriod,
-          ]
-          const movements = calculateMrrMovements(subs, previousSubs)
+          const previousSubs = [...subs, ...canceledInPeriod].filter(
+            s => !newIds.has(s.id)
+          )
+          const movements = calculateMrrMovements(subs, previousSubs, allCanceled)
 
           process.stdout.write(`  ${pc.bold('MRR Movements')} ${pc.dim('(last 30 days)')}\n`)
 

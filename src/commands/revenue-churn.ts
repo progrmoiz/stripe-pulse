@@ -33,22 +33,24 @@ export function makeRevenueChurnCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [activeSubs, newSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, newSubs, canceledSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
             fetcher.getCanceledSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
         // Reconstruct start-of-period subs: active now + canceled during period - new during period
+        const newIds = new Set(newSubs.map((s) => s.id))
         const previousSubs = [...activeSubs, ...canceledSubs].filter(
-          (sub) => !newSubs.find((n) => n.id === sub.id)
+          (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
         const mrrAtStart = calculatePeriodMrr(previousSubs)
         const result = calculateRevenueChurn(mrrAtStart, movements.churnedMrr, startDate, endDate, movements.currency)
 

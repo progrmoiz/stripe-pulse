@@ -8,7 +8,7 @@ import { withSpinner } from '../lib/spinner.js'
 import { createStripeClient } from '../core/stripe-client.js'
 import { Cache } from '../core/cache.js'
 import { StripeFetcher } from '../core/fetchers.js'
-import { calculateCustomerChurn } from '../core/calculations.js'
+import { calculateCustomerChurn, getCustomerId } from '../core/calculations.js'
 import { churnBenchmark } from '../lib/benchmarks.js'
 
 function resolvePeriod(opts: GlobalOpts): { startDate: string; endDate: string } {
@@ -33,16 +33,18 @@ export function makeChurnCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [activeSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, canceledSubs, newSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getCanceledSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
-        const result = calculateCustomerChurn(activeSubs, canceledSubs, startDate, endDate)
+        const result = calculateCustomerChurn(activeSubs, canceledSubs, startDate, endDate, allCanceledSubs, newSubs)
 
         if (shouldOutputJson(opts)) {
           process.stdout.write(JSON.stringify(result, null, 2) + '\n')
@@ -68,6 +70,7 @@ export function makeChurnCommand(globalOpts: () => GlobalOpts): Command {
         if (opts.verbose) {
           process.stdout.write(`Customers at start:  ${result.customersAtStart}\n`)
           process.stdout.write(`Customers lost:      ${result.customersLost}\n`)
+          process.stdout.write(`Reactivated:         ${result.reactivatedCustomers}\n`)
           process.stdout.write(`Period:              ${startDate} → ${endDate}\n`)
         }
       } catch (err) {

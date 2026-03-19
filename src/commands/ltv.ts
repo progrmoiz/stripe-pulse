@@ -30,19 +30,21 @@ export function makeLtvCommand(globalOpts: () => GlobalOpts): Command {
         const startDate = thirtyDaysAgo.toISOString().slice(0, 10)
         const endDate = now.toISOString().slice(0, 10)
 
-        const [activeSubs, allSubs, canceledSubs] = await withSpinner(
+        const [activeSubs, allSubs, canceledSubs, newSubs, allCanceledSubs] = await withSpinner(
           'Fetching subscriptions...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
             fetcher.getAllSubscriptions(),
             fetcher.getCanceledSubscriptionsInPeriod(thirtyDaysAgo, now),
+            fetcher.getNewSubscriptionsInPeriod(thirtyDaysAgo, now),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
         const mrrResult = calculateMrr(activeSubs)
         const arpuResult = calculateArpu(mrrResult.mrr, mrrResult.activeSubscriptions, mrrResult.currency)
-        const churnResult = calculateCustomerChurn(allSubs, canceledSubs, startDate, endDate)
+        const churnResult = calculateCustomerChurn(allSubs, canceledSubs, startDate, endDate, allCanceledSubs, newSubs)
         const result = calculateLtv(arpuResult.arpu, churnResult.customerChurnRate, mrrResult.currency)
 
         if (shouldOutputJson(opts)) {

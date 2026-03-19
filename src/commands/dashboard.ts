@@ -22,8 +22,9 @@ import {
   calculateNetRevenueRetention,
   calculateQuickRatio,
   calculateCustomerMetrics,
+  getCustomerId,
 } from '../core/calculations.js'
-import type { SaasDashboard } from '../core/types.js'
+import type { SaasDashboard, ReactivationDetail } from '../core/types.js'
 
 export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
   return new Command('dashboard')
@@ -47,7 +48,7 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
         const endStr = now.toISOString().slice(0, 10)
 
         // Single spinner — fetch all data in parallel
-        const [activeSubs, allSubs, newSubs, canceledSubs, productMap] = await withSpinner(
+        const [activeSubs, allSubs, newSubs, canceledSubs, productMap, allCanceledSubs] = await withSpinner(
           'Fetching metrics...',
           () => Promise.all([
             fetcher.getActiveSubscriptions(),
@@ -55,6 +56,7 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
             fetcher.getNewSubscriptionsInPeriod(thirtyDaysAgo, now),
             fetcher.getCanceledSubscriptionsInPeriod(thirtyDaysAgo, now),
             fetcher.getProductMap().catch(() => new Map<string, string>()),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
@@ -71,16 +73,15 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
         const arpuResult = calculateArpu(mrrResult.mrr, mrrResult.activeSubscriptions, mrrResult.currency)
 
         // Churn
-        const churnResult = calculateCustomerChurn(activeSubs, canceledSubs, startStr, endStr)
+        const churnResult = calculateCustomerChurn(activeSubs, canceledSubs, startStr, endStr, allCanceledSubs, newSubs)
 
         // MRR movements (same logic as movements.ts and dashboard MCP tool)
         const newIds = new Set(newSubs.map((s) => s.id))
-        const previousSubs = [
-          ...activeSubs.filter((s) => !newIds.has(s.id)),
-          ...canceledSubs,
-        ]
+        const previousSubs = [...activeSubs, ...canceledSubs].filter(
+          (s) => !newIds.has(s.id)
+        )
         const startMrr = calculatePeriodMrr(previousSubs)
-        const movements = calculateMrrMovements(activeSubs, previousSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
         movements.period = { start: startStr, end: endStr }
 
         // Revenue churn
@@ -104,6 +105,7 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
         const qrResult = calculateQuickRatio(
           movements.newMrr,
           movements.expansionMrr,
+          movements.reactivationMrr,
           movements.churnedMrr,
           movements.contractionMrr,
           mrrResult.currency,
@@ -139,6 +141,8 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
           ltv: ltvResult.ltv,
           nrr: nrrResult.nrr,
           quickRatio: qrResult.quickRatio === Infinity ? null : qrResult.quickRatio,
+          reactivatedCustomers: churnResult.reactivatedCustomers,
+          reactivations: movements.reactivations,
           trialConversionRate,
           mrrByPlan: mrrResult.breakdown.map(p => ({
             ...p,

@@ -9,8 +9,8 @@ import { renderTable } from '../lib/table.js'
 import { createStripeClient } from '../core/stripe-client.js'
 import { Cache } from '../core/cache.js'
 import { StripeFetcher } from '../core/fetchers.js'
-import { calculateSubscriptionPlanMrr } from '../core/calculations.js'
-import type { CustomerListResult, FormattedCustomer } from '../core/types.js'
+import { calculateSubscriptionPlanMrr, classifyNewSubscriptions } from '../core/calculations.js'
+import type { CustomerListResult, FormattedCustomer, ReactivationDetail } from '../core/types.js'
 import type Stripe from 'stripe'
 
 function resolvePeriod(opts: GlobalOpts): { startDate: string; endDate: string } {
@@ -64,22 +64,26 @@ export function makeNewCustomersCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
         const { startDate, endDate } = resolvePeriod(opts)
 
-        const [newSubs, productMap] = await withSpinner(
+        const [newSubs, productMap, allCanceledSubs] = await withSpinner(
           'Fetching new customers...',
           () => Promise.all([
             fetcher.getNewSubscriptionsInPeriod(new Date(startDate), new Date(endDate)),
             fetcher.getProductMap(),
+            fetcher.getAllCanceledSubscriptions(),
           ]),
           opts
         )
 
-        const customers = newSubs.map((s) => formatCustomerFromSub(s, productMap))
+        const { trulyNew, reactivations, reactivationDetails } = classifyNewSubscriptions(newSubs, allCanceledSubs)
+        const customers = trulyNew.map((s) => formatCustomerFromSub(s, productMap))
         const totalMrr = customers.reduce((sum, c) => sum + c.mrr, 0)
         const currency = customers[0]?.currency ?? 'usd'
 
         const result: CustomerListResult = {
           period: { start: startDate, end: endDate },
           count: customers.length,
+          reactivatedCount: reactivations.length,
+          reactivations: reactivationDetails,
           totalMrr,
           customers,
         }
@@ -125,7 +129,25 @@ export function makeNewCustomersCommand(globalOpts: () => GlobalOpts): Command {
           ]) + '\n'
         )
 
-        process.stdout.write(pc.dim(`\n${customers.length} new customers  ·  Total MRR: ${formatCurrency(totalMrr, currency)}\n`))
+        // Non-verbose reactivation note
+        if (reactivations.length > 0 && !opts.verbose) {
+          process.stdout.write(pc.dim(`\nNote: ${reactivations.length} subscription(s) reclassified as reactivation (use --verbose for details)\n`))
+        }
+
+        // Verbose: reactivation details
+        if (opts.verbose && reactivations.length > 0) {
+          process.stdout.write(`\nReactivated Customers (${reactivations.length}):\n`)
+          for (const r of reactivationDetails) {
+            process.stdout.write(
+              `  ${r.customerId}  canceled ${r.canceledAt}  reactivated ${r.reactivatedAt}  ` +
+              `${r.previousSubscriptionId} → ${r.newSubscriptionId}  ` +
+              `${formatCurrency(r.mrrCents / 100, currency)} MRR\n`
+            )
+          }
+        }
+
+        const reactNote = reactivations.length > 0 ? `  ·  ${reactivations.length} reactivated` : ''
+        process.stdout.write(pc.dim(`\n${customers.length} new customers  ·  Total MRR: ${formatCurrency(totalMrr, currency)}${reactNote}\n`))
       } catch (err) {
         outputError({ code: 'API', message: err instanceof Error ? err.message : 'Unknown error' }, opts)
         process.exit(ExitCode.API_ERROR)

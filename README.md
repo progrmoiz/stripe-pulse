@@ -19,7 +19,7 @@ MRR · ARR · Churn · LTV · NRR · Quick Ratio · MRR Movements — straight f
 
 Stripe has no MRR endpoint. Baremetrics costs $129/mo. ChartMogul starts at $199/mo. ProfitWell requires an integration.
 
-stripe-pulse calculates everything locally from your Stripe subscriptions — in seconds, from the command line, for free.
+stripe-pulse calculates everything locally from your Stripe subscriptions — in seconds, from the command line, for free. Reactivations are tracked at the customer level (industry standard used by Baremetrics, ChartMogul, and ProfitWell).
 
 ---
 
@@ -92,11 +92,11 @@ These accept `--from` and `--to` (ISO 8601 dates). Default: last 30 days.
 
 | Command | Description |
 |---------|-------------|
-| `churn` | Customer churn rate |
+| `churn` | Customer churn rate (with reactivation netting) |
 | `revenue-churn` | MRR churn rate |
 | `nrr` | Net Revenue Retention |
-| `quick-ratio` | SaaS Quick Ratio |
-| `movements` | MRR movement breakdown |
+| `quick-ratio` | SaaS Quick Ratio (includes reactivation MRR) |
+| `movements` | MRR movement breakdown (new, expansion, contraction, churn, reactivation) |
 
 ### Customer Lists
 
