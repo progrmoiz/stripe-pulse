@@ -64,7 +64,8 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
         // ── Calculations ──────────────────────────────────────────────────────
 
         // MRR + breakdown
-        const mrrResult = calculateMrr(activeSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const mrrResult = calculateMrr(activeSubs, tiersMap)
 
         // Customer metrics (active, trialing, past due)
         const customerMetrics = calculateCustomerMetrics(allSubs)
@@ -80,8 +81,8 @@ export function makeDashboardCommand(globalOpts: () => GlobalOpts): Command {
         const previousSubs = [...activeSubs, ...canceledSubs].filter(
           (s) => !newIds.has(s.id)
         )
-        const startMrr = calculatePeriodMrr(previousSubs)
-        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
+        const startMrr = calculatePeriodMrr(previousSubs, tiersMap)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs, tiersMap)
         movements.period = { start: startStr, end: endStr }
 
         // Revenue churn

@@ -48,7 +48,8 @@ export function makeMovementsCommand(globalOpts: () => GlobalOpts): Command {
           (s) => !newIds.has(s.id)
         )
 
-        const result = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const result = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs, tiersMap)
         // Stamp the period on the result
         result.period = { start: startDate, end: endDate }
 

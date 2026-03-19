@@ -13,7 +13,7 @@ import { calculateSubscriptionPlanMrr } from '../core/calculations.js'
 import type { CustomerListResult, FormattedCustomer } from '../core/types.js'
 import type Stripe from 'stripe'
 
-function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string, string>): FormattedCustomer {
+function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string, string>, tiersMap?: Parameters<typeof calculateSubscriptionPlanMrr>[1]): FormattedCustomer {
   const customer = sub.customer
   const isFullCustomer = typeof customer !== 'string' && 'email' in customer
   const planPrice = sub.items.data[0]?.price
@@ -33,7 +33,7 @@ function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string,
     status: sub.status,
     plan: productName,
     interval: planPrice?.recurring?.interval ?? 'unknown',
-    mrr: Math.round(calculateSubscriptionPlanMrr(sub)) / 100,
+    mrr: Math.round(calculateSubscriptionPlanMrr(sub, tiersMap)) / 100,
     created: new Date((sub.created ?? 0) * 1000).toISOString().slice(0, 10),
     canceledAt: null,
     currency: sub.currency ?? 'usd',
@@ -63,9 +63,10 @@ export function makeActiveCommand(globalOpts: () => GlobalOpts): Command {
           ]),
           opts
         )
+        const tiersMap = await fetcher.getPriceTiers(subs)
 
         const customers = subs
-          .map((s) => formatCustomerFromSub(s, productMap))
+          .map((s) => formatCustomerFromSub(s, productMap, tiersMap))
           .sort((a, b) => b.mrr - a.mrr)
 
         const totalMrr = customers.reduce((sum, c) => sum + c.mrr, 0)

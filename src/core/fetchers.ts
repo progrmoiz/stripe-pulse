@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { Cache } from "./cache.js";
 
-const SUB_EXPAND = ["data.items.data.price", "data.discount", "data.customer"];
+const SUB_EXPAND = ["data.items.data.price", "data.discount", "data.discounts", "data.customer"];
 const PAGE_LIMIT = 10_000;
 
 export class StripeFetcher {
@@ -124,6 +124,46 @@ export class StripeFetcher {
       .autoPagingToArray({ limit: PAGE_LIMIT });
 
     this.cache.set("all_canceled", result);
+    return result;
+  }
+
+  /**
+   * Fetch tier definitions for tiered/licensed prices found in subscriptions.
+   * Skips metered prices (excluded from MRR).
+   */
+  async getPriceTiers(
+    subs: Stripe.Subscription[],
+  ): Promise<Map<string, { tiers: Stripe.Price.Tier[]; tiersMode: string }>> {
+    const cacheKey = "price_tiers";
+    const cached = this.cache.get<Map<string, { tiers: Stripe.Price.Tier[]; tiersMode: string }>>(cacheKey);
+    if (cached) return cached;
+
+    const tieredPriceIds = new Set<string>();
+    for (const sub of subs) {
+      for (const item of sub.items.data) {
+        if (
+          item.price?.billing_scheme === "tiered" &&
+          item.price?.recurring?.usage_type !== "metered"
+        ) {
+          tieredPriceIds.add(item.price.id);
+        }
+      }
+    }
+
+    const result = new Map<string, { tiers: Stripe.Price.Tier[]; tiersMode: string }>();
+    for (const priceId of tieredPriceIds) {
+      const price = await this.stripe.prices.retrieve(priceId, {
+        expand: ["tiers"],
+      });
+      if (price.tiers && price.tiers_mode) {
+        result.set(priceId, {
+          tiers: price.tiers,
+          tiersMode: price.tiers_mode,
+        });
+      }
+    }
+
+    this.cache.set(cacheKey, result);
     return result;
   }
 

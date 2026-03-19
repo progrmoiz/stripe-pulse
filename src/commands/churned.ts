@@ -19,7 +19,7 @@ function resolvePeriod(opts: GlobalOpts): { startDate: string; endDate: string }
   return { startDate, endDate }
 }
 
-function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string, string>): FormattedCustomer {
+function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string, string>, tiersMap?: Parameters<typeof calculateSubscriptionPlanMrr>[1]): FormattedCustomer {
   const customer = sub.customer
   const isFullCustomer = typeof customer !== 'string' && 'email' in customer
   const planPrice = sub.items.data[0]?.price
@@ -39,7 +39,7 @@ function formatCustomerFromSub(sub: Stripe.Subscription, productMap: Map<string,
     status: sub.status,
     plan: productName,
     interval: planPrice?.recurring?.interval ?? 'unknown',
-    mrr: Math.round(calculateSubscriptionPlanMrr(sub)) / 100,
+    mrr: Math.round(calculateSubscriptionPlanMrr(sub, tiersMap)) / 100,
     created: new Date((sub.created ?? 0) * 1000).toISOString().slice(0, 10),
     canceledAt: sub.canceled_at
       ? new Date(sub.canceled_at * 1000).toISOString().slice(0, 10)
@@ -73,7 +73,8 @@ export function makeChurnedCommand(globalOpts: () => GlobalOpts): Command {
           opts
         )
 
-        const customers = canceledSubs.map((s) => formatCustomerFromSub(s, productMap))
+        const tiersMap = await fetcher.getPriceTiers(canceledSubs)
+        const customers = canceledSubs.map((s) => formatCustomerFromSub(s, productMap, tiersMap))
         const totalLostMrr = customers.reduce((sum, c) => sum + c.mrr, 0)
         const currency = customers[0]?.currency ?? 'usd'
 

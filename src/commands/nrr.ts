@@ -49,8 +49,9 @@ export function makeNrrCommand(globalOpts: () => GlobalOpts): Command {
           (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
-        const startingMrr = calculatePeriodMrr(previousSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs, tiersMap)
+        const startingMrr = calculatePeriodMrr(previousSubs, tiersMap)
         const result = calculateNetRevenueRetention(
           startingMrr,
           movements.expansionMrr,

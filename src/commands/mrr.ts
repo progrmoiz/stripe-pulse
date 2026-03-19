@@ -29,7 +29,8 @@ export function makeMrrCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
 
         const subs = await withSpinner('Fetching subscriptions...', () => fetcher.getActiveSubscriptions(), opts)
-        const result = calculateMrr(subs)
+        const tiersMap = await fetcher.getPriceTiers(subs)
+        const result = calculateMrr(subs, tiersMap)
 
         if (shouldOutputJson(opts)) {
           process.stdout.write(JSON.stringify(result, null, 2) + '\n')
@@ -62,7 +63,7 @@ export function makeMrrCommand(globalOpts: () => GlobalOpts): Command {
           }, opts)
 
           // ── 1. MRR Trend (last 6 months) ──
-          const history = reconstructMrrHistory(subs, allCanceled, 6)
+          const history = reconstructMrrHistory(subs, allCanceled, 6, tiersMap)
           const mrrValues = history.map(p => p.mrr)
 
           // Header with sparkline
@@ -86,7 +87,7 @@ export function makeMrrCommand(globalOpts: () => GlobalOpts): Command {
           const previousSubs = [...subs, ...canceledInPeriod].filter(
             s => !newIds.has(s.id)
           )
-          const movements = calculateMrrMovements(subs, previousSubs, allCanceled)
+          const movements = calculateMrrMovements(subs, previousSubs, allCanceled, tiersMap)
 
           process.stdout.write(`  ${pc.bold('MRR Movements')} ${pc.dim('(last 30 days)')}\n`)
 

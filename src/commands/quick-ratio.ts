@@ -49,7 +49,8 @@ export function makeQuickRatioCommand(globalOpts: () => GlobalOpts): Command {
           (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs, tiersMap)
         const result = calculateQuickRatio(
           movements.newMrr,
           movements.expansionMrr,

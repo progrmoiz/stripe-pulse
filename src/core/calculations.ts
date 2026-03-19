@@ -14,7 +14,50 @@ import type {
   ReactivationDetail,
 } from "./types.js";
 
+// ── Types ────────────────────────────────────────────────
+
+/** Cached tier definitions for tiered/licensed prices. */
+export type TiersMap = Map<string, { tiers: Stripe.Price.Tier[]; tiersMode: string }>;
+
 // ── Helpers ──────────────────────────────────────────────
+
+/** Calculate the amount for a tiered price given quantity and tier brackets. */
+function calcTieredAmountCents(
+  tiers: Stripe.Price.Tier[],
+  tiersMode: string,
+  quantity: number,
+): number {
+  if (!tiers.length || quantity <= 0) return 0;
+
+  if (tiersMode === "volume") {
+    for (const tier of tiers) {
+      const upTo = tier.up_to ?? Infinity;
+      if (quantity <= upTo) {
+        return (tier.unit_amount ?? 0) * quantity + (tier.flat_amount ?? 0);
+      }
+    }
+    return 0;
+  }
+
+  if (tiersMode === "graduated") {
+    let total = 0;
+    let remaining = quantity;
+    let prevUpTo = 0;
+    for (const tier of tiers) {
+      const upTo = tier.up_to ?? Infinity;
+      const unitsInTier = Math.min(remaining, upTo - prevUpTo);
+      if (unitsInTier > 0) {
+        total += (tier.unit_amount ?? 0) * unitsInTier + (tier.flat_amount ?? 0);
+      }
+      remaining -= unitsInTier;
+      prevUpTo = upTo;
+      if (remaining <= 0) break;
+    }
+    return total;
+  }
+
+  return 0;
+}
 
 /** Normalize a price amount (in cents) to monthly cents. */
 function normalizeToMonthlyCents(
@@ -196,16 +239,34 @@ export function classifyNewSubscriptions(
  */
 export function calculateSubscriptionPlanMrr(
   subscription: Stripe.Subscription,
+  tiersMap?: TiersMap,
 ): number {
   let totalMonthlyCents = 0;
 
   for (const item of subscription.items.data) {
-    const unitAmount = item.price?.unit_amount ?? 0;
-    const quantity = item.quantity ?? 1;
+    // Bug fix #2: Skip metered items — they have no predictable MRR
+    if (item.price?.recurring?.usage_type === "metered") continue;
+
     const interval = item.price?.recurring?.interval ?? "month";
     const intervalCount = item.price?.recurring?.interval_count ?? 1;
 
-    const itemCents = unitAmount * quantity;
+    let itemCents: number;
+
+    // Bug fix #1: Handle tiered/licensed pricing
+    if (
+      item.price?.billing_scheme === "tiered" &&
+      tiersMap &&
+      item.price?.id &&
+      tiersMap.has(item.price.id)
+    ) {
+      const { tiers, tiersMode } = tiersMap.get(item.price.id)!;
+      itemCents = calcTieredAmountCents(tiers, tiersMode, item.quantity ?? 0);
+    } else {
+      const unitAmount = item.price?.unit_amount ?? 0;
+      const quantity = item.quantity ?? 1;
+      itemCents = unitAmount * quantity;
+    }
+
     totalMonthlyCents += normalizeToMonthlyCents(
       itemCents,
       interval,
@@ -213,14 +274,23 @@ export function calculateSubscriptionPlanMrr(
     );
   }
 
-  // Apply forever coupon discounts
-  const discount = subscription.discount;
-  if (discount?.coupon?.duration === "forever") {
-    const coupon = discount.coupon;
-    if (coupon.percent_off) {
-      totalMonthlyCents *= 1 - coupon.percent_off / 100;
-    } else if (coupon.amount_off) {
-      totalMonthlyCents -= coupon.amount_off;
+  // Bug fix #3: Apply forever coupon discounts from discounts[] array
+  const discounts: Array<string | Stripe.Discount> =
+    subscription.discounts?.length
+      ? subscription.discounts
+      : subscription.discount
+        ? [subscription.discount]
+        : [];
+
+  for (const d of discounts) {
+    if (typeof d === "string") continue;
+    if (d?.coupon?.duration === "forever") {
+      const coupon = d.coupon;
+      if (coupon.percent_off) {
+        totalMonthlyCents *= 1 - coupon.percent_off / 100;
+      } else if (coupon.amount_off) {
+        totalMonthlyCents -= coupon.amount_off;
+      }
     }
   }
 
@@ -233,16 +303,18 @@ export function calculateSubscriptionPlanMrr(
  */
 export function calculateSubscriptionMrr(
   subscription: Stripe.Subscription,
+  tiersMap?: TiersMap,
 ): number {
   if (isTrialing(subscription)) return 0;
   if (!isActiveForMrr(subscription)) return 0;
-  return calculateSubscriptionPlanMrr(subscription);
+  return calculateSubscriptionPlanMrr(subscription, tiersMap);
 }
 
 // ── Aggregate MRR ────────────────────────────────────────
 
 export function calculateMrr(
   subscriptions: Stripe.Subscription[],
+  tiersMap?: TiersMap,
 ): MrrResult {
   const activeSubs = subscriptions.filter(isActiveForMrr);
   const currency = detectCurrency(subscriptions);
@@ -262,7 +334,7 @@ export function calculateMrr(
   >();
 
   for (const sub of activeSubs) {
-    const subMrr = calculateSubscriptionMrr(sub);
+    const subMrr = calculateSubscriptionMrr(sub, tiersMap);
     totalMrrCents += subMrr;
 
     // Calculate raw (pre-discount) MRR for this subscription
@@ -270,15 +342,25 @@ export function calculateMrr(
     let rawSubMrrCents = 0;
     const itemMrrs: { item: Stripe.SubscriptionItem; mrrCents: number }[] = [];
     for (const item of sub.items.data) {
-      const unitAmount = item.price?.unit_amount ?? 0;
-      const quantity = item.quantity ?? 1;
+      if (item.price?.recurring?.usage_type === "metered") continue;
+
       const interval = item.price?.recurring?.interval ?? "month";
       const intervalCount = item.price?.recurring?.interval_count ?? 1;
-      const mrrCents = normalizeToMonthlyCents(
-        unitAmount * quantity,
-        interval,
-        intervalCount,
-      );
+
+      let itemCents: number;
+      if (
+        item.price?.billing_scheme === "tiered" &&
+        tiersMap &&
+        item.price?.id &&
+        tiersMap.has(item.price.id)
+      ) {
+        const { tiers, tiersMode } = tiersMap.get(item.price.id)!;
+        itemCents = calcTieredAmountCents(tiers, tiersMode, item.quantity ?? 0);
+      } else {
+        itemCents = (item.price?.unit_amount ?? 0) * (item.quantity ?? 1);
+      }
+
+      const mrrCents = normalizeToMonthlyCents(itemCents, interval, intervalCount);
       rawSubMrrCents += mrrCents;
       itemMrrs.push({ item, mrrCents });
     }
@@ -338,10 +420,10 @@ export function calculateMrr(
  * regardless of current status. Used to reconstruct start-of-period MRR
  * where some subs may now be canceled but were active at the time.
  */
-export function calculatePeriodMrr(subscriptions: Stripe.Subscription[]): number {
+export function calculatePeriodMrr(subscriptions: Stripe.Subscription[], tiersMap?: TiersMap): number {
   let totalCents = 0;
   for (const sub of subscriptions) {
-    totalCents += calculateSubscriptionPlanMrr(sub);
+    totalCents += calculateSubscriptionPlanMrr(sub, tiersMap);
   }
   return Math.round(totalCents) / 100;
 }
@@ -352,6 +434,7 @@ export function calculateMrrMovements(
   currentSubs: Stripe.Subscription[],
   previousSubs: Stripe.Subscription[],
   allCanceledSubs: Stripe.Subscription[],  // REQUIRED -- no optional footgun
+  tiersMap?: TiersMap,
 ): MrrMovements {
   const currency = detectCurrency([...currentSubs, ...previousSubs]);
 
@@ -365,14 +448,14 @@ export function calculateMrrMovements(
   const prevMap = new Map<string, number>();
   const prevStatusMap = new Map<string, string>();
   for (const sub of previousSubs) {
-    prevMap.set(sub.id, calculateSubscriptionPlanMrr(sub));
+    prevMap.set(sub.id, calculateSubscriptionPlanMrr(sub, tiersMap));
     prevStatusMap.set(sub.id, sub.status);
   }
 
   const currMap = new Map<string, number>();
   const currStatusMap = new Map<string, string>();
   for (const sub of currentSubs) {
-    currMap.set(sub.id, calculateSubscriptionPlanMrr(sub));
+    currMap.set(sub.id, calculateSubscriptionPlanMrr(sub, tiersMap));
     currStatusMap.set(sub.id, sub.status);
   }
 
@@ -674,6 +757,7 @@ export function reconstructMrrHistory(
   activeSubs: Stripe.Subscription[],
   canceledSubs: Stripe.Subscription[],
   months = 6,
+  tiersMap?: TiersMap,
 ): MrrHistoryPoint[] {
   const allSubs = [...activeSubs, ...canceledSubs]
   const now = new Date()
@@ -701,7 +785,7 @@ export function reconstructMrrHistory(
     // Calculate MRR from those subs
     let totalCents = 0
     for (const sub of activeAtDate) {
-      totalCents += calculateSubscriptionPlanMrr(sub)
+      totalCents += calculateSubscriptionPlanMrr(sub, tiersMap)
     }
 
     const label = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`

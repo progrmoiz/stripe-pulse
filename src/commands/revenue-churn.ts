@@ -50,8 +50,9 @@ export function makeRevenueChurnCommand(globalOpts: () => GlobalOpts): Command {
           (s) => !newIds.has(s.id)
         )
 
-        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs)
-        const mrrAtStart = calculatePeriodMrr(previousSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const movements = calculateMrrMovements(activeSubs, previousSubs, allCanceledSubs, tiersMap)
+        const mrrAtStart = calculatePeriodMrr(previousSubs, tiersMap)
         const result = calculateRevenueChurn(mrrAtStart, movements.churnedMrr, startDate, endDate, movements.currency)
 
         if (shouldOutputJson(opts)) {

@@ -25,7 +25,8 @@ export function makeArrCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
 
         const subs = await withSpinner('Fetching subscriptions...', () => fetcher.getActiveSubscriptions(), opts)
-        const result = calculateMrr(subs)
+        const tiersMap = await fetcher.getPriceTiers(subs)
+        const result = calculateMrr(subs, tiersMap)
 
         if (shouldOutputJson(opts)) {
           process.stdout.write(JSON.stringify({ arr: result.arr, mrr: result.mrr, currency: result.currency }, null, 2) + '\n')

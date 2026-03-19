@@ -25,7 +25,8 @@ export function makeArpuCommand(globalOpts: () => GlobalOpts): Command {
         const fetcher = new StripeFetcher(stripe, new Cache())
 
         const subs = await withSpinner('Fetching subscriptions...', () => fetcher.getActiveSubscriptions(), opts)
-        const mrrResult = calculateMrr(subs)
+        const tiersMap = await fetcher.getPriceTiers(subs)
+        const mrrResult = calculateMrr(subs, tiersMap)
         const result = calculateArpu(mrrResult.mrr, mrrResult.activeSubscriptions, mrrResult.currency)
 
         if (shouldOutputJson(opts)) {

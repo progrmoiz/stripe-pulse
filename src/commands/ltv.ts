@@ -42,7 +42,8 @@ export function makeLtvCommand(globalOpts: () => GlobalOpts): Command {
           opts
         )
 
-        const mrrResult = calculateMrr(activeSubs)
+        const tiersMap = await fetcher.getPriceTiers(activeSubs)
+        const mrrResult = calculateMrr(activeSubs, tiersMap)
         const arpuResult = calculateArpu(mrrResult.mrr, mrrResult.activeSubscriptions, mrrResult.currency)
         const churnResult = calculateCustomerChurn(allSubs, canceledSubs, startDate, endDate, allCanceledSubs, newSubs)
         const result = calculateLtv(arpuResult.arpu, churnResult.customerChurnRate, mrrResult.currency)

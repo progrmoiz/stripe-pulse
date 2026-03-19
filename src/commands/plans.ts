@@ -30,7 +30,8 @@ export function makePlansCommand(globalOpts: () => GlobalOpts): Command {
           fetcher.getActiveSubscriptions(),
           fetcher.getProductMap().catch(() => new Map<string, string>()),
         ]), opts)
-        const result = calculateMrr(subs)
+        const tiersMap = await fetcher.getPriceTiers(subs)
+        const result = calculateMrr(subs, tiersMap)
         const breakdown = result.breakdown
 
         if (shouldOutputJson(opts)) {
