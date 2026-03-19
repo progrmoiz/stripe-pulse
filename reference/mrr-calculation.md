@@ -28,7 +28,7 @@ A subscription is included if ALL of these are true:
 | Status | `active` or `past_due` | Other statuses don't generate revenue |
 | Not trialing | `status !== 'trialing'` AND `trial_end` not in future | Trials haven't converted yet |
 | Not canceling | `cancel_at_period_end === false` | Customer already hit cancel; revenue won't renew |
-| Not paused | `pause_collection` is null | Paused subs don't invoice (status stays `active`) |
+| Not paused | `pause_collection` is null | Paused subs don't invoice (status stays `active`) — **not yet implemented** |
 
 Source: [`isActiveForMrr()`](../src/core/calculations.ts)
 
@@ -47,7 +47,7 @@ Within a qualifying subscription, each line item is included if:
 | Metered/usage-based items | Variable amount, not known until invoiced |
 | Trialing subscriptions | Haven't converted to paid |
 | Canceling subscriptions (`cancel_at_period_end`) | Customer canceled; won't renew next period |
-| Paused subscriptions | Not invoicing (Stripe keeps status as `active`) |
+| Paused subscriptions | Not invoicing (Stripe keeps status as `active`) — **not yet implemented** |
 | Taxes | MRR is pre-tax revenue |
 | Prorations | One-time mid-cycle adjustments, not recurring |
 | One-time invoice items | Not recurring |
@@ -113,14 +113,22 @@ We read `subscription.discounts[]` (plural array), falling back to `subscription
 | Coupon Duration | Subtracted? | Why |
 |----------------|-------------|-----|
 | `forever` | Yes | Permanent reduction — this IS the steady-state revenue |
-| `repeating` | No | Temporary promotion; MRR should reflect what you'll earn after it expires |
+| `repeating` | Yes, while active | Subtracted while `discount.end > now`; once expired, MRR returns to full price |
 | `once` | No | One-time; doesn't affect recurring revenue |
 
 ### How discounts are applied
 
-- **`percent_off`**: `totalMonthlyCents *= (1 - percent_off / 100)`
-- **`amount_off`**: `totalMonthlyCents -= amount_off` (in smallest currency unit, e.g., cents)
-- Multiple forever discounts on the same subscription are applied sequentially
+Discounts are applied in two passes to match Stripe's behavior:
+
+1. **First pass — all `percent_off` coupons**: `totalMonthlyCents *= (1 - percent_off / 100)` (compounding)
+2. **Second pass — all `amount_off` coupons**: normalized to monthly before subtraction
+
+**`amount_off` normalization**: The discount amount is per-invoice, so it must be normalized to monthly just like the subscription amount. A $500 `amount_off` coupon on a yearly subscription = $41.67/month reduction, not $500/month.
+
+```
+monthlyDiscount = normalizeToMonthlyCents(amount_off, subInterval, subIntervalCount)
+```
+
 - MRR is floored at $0 — a single subscription can never have negative MRR
 
 Source: [`calculateSubscriptionPlanMrr()`](../src/core/calculations.ts)
@@ -211,7 +219,8 @@ These are things we know aren't perfect:
 1. **Historical MRR uses current prices.** Upgrades/downgrades retroactively change the history chart.
 2. **Single-currency assumption.** `detectCurrency` returns the first currency found. Multi-currency accounts mix USD and EUR cents.
 3. **No invoice-based validation.** We read subscription metadata, not actual invoices. If Stripe's subscription state is stale, so are we.
-4. **Coupon normalization.** `amount_off` coupons are subtracted as-is from monthly cents. For annual subscriptions with monthly-denominated coupons, this is correct. But edge cases with mismatched coupon/subscription intervals may exist.
+4. **Paused subscriptions not excluded.** Subscriptions with `pause_collection` set are still counted toward MRR. Stripe's dashboard excludes them.
+5. **Coupon interval edge cases.** `amount_off` is normalized using the first item's billing interval. Subscriptions with mixed intervals across items may normalize incorrectly.
 
 ---
 
