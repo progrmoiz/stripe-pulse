@@ -18,7 +18,6 @@ Get MRR, ARR, churn, LTV, NRR, quick ratio, MRR movements, reactivations — dir
 - Updating pulse.md or state files that track MRR
 - Running freshness guards that check Stripe data
 - User wants to export metrics (CSV, markdown, JSON)
-- User says "check stripe", "what's our MRR", "how's churn looking", "any reactivations"
 - Comparing metrics across profiles/accounts
 
 ## Quick Start
@@ -29,11 +28,10 @@ stripe-pulse login
 
 # Check MRR
 stripe-pulse mrr --json
-# → { "mrr": 392, "arr": 4704, "currency": "usd", "activeSubscriptions": 18, "breakdown": [...] }
+# → { "mrr": 392, "arr": 4704, "currency": "usd", "activeSubscriptions": 18 }
 
-# Full dashboard (most efficient — one call, all metrics)
+# Full dashboard (one call, all metrics — most efficient)
 stripe-pulse dashboard --json
-# → { "mrr": ..., "churn": ..., "reactivatedCustomers": ..., "reactivations": [...], ... }
 ```
 
 ## Authentication
@@ -80,12 +78,14 @@ Period flags: `--from 2026-01-01 --to 2026-01-31`
 | `active --json` | All active (by MRR desc) | `count`, `customers[].email`, `.mrr` |
 
 ### Dashboard (All-in-One)
+
 ```bash
 stripe-pulse dashboard --json
 ```
+
 Returns every metric in one call: `mrr`, `arr`, `activeSubscribers`, `arpu`, `customerChurnRate`, `revenueChurnRate`, `ltv`, `nrr`, `quickRatio`, `reactivatedCustomers`, `reactivations[]`, `trialConversionRate`, `mrrByPlan[]`, `currency`, `dataAsOf`.
 
-**This is the most efficient call.** Use it when you need multiple metrics — one API batch instead of many.
+**Use `dashboard --json` when you need 2+ metrics** — one parallel batch instead of many sequential calls.
 
 ### Auth & Diagnostics
 | Command | Purpose |
@@ -116,14 +116,14 @@ Returns every metric in one call: `mrr`, `arr`, `activeSubscribers`, `arpu`, `cu
 
 ## Reactivation Tracking
 
-When a customer cancels and later resubscribes, Stripe creates a new subscription ID. stripe-pulse detects this by matching customer IDs across canceled and new subscriptions.
+stripe-pulse detects win-backs by matching customer IDs across canceled and new subscriptions.
 
 **Classification rules:**
-- Matches at the **customer ID level** (industry standard — same as Baremetrics, ChartMogul, ProfitWell)
-- Only **paid** reactivations count — free-tier returns are excluded (`mrrCents > 0`)
-- **24h minimum gap** — cancel/resub within 24 hours is treated as a plan switch, not reactivation
-- **One per customer** — if a customer creates multiple new subs, only the most recent counts
-- Churn still counts — reactivation is a separate positive MRR movement, not a reversal
+- Matches at the **customer ID level** (same as Baremetrics, ChartMogul, ProfitWell)
+- Only **paid** reactivations count — free-tier returns excluded (`mrrCents > 0`)
+- **24h minimum gap** — cancel/resub within 24h treated as a plan switch
+- **One per customer** — only the most recent new sub counts
+- Churn still counts — reactivation is a separate positive MRR movement
 
 **Quick Ratio formula:** `(New + Expansion + Reactivation) / (Churn + Contraction)`
 
@@ -133,36 +133,49 @@ When a customer cancels and later resubscribes, Stripe creates a new subscriptio
 | `dashboard --json` | `reactivatedCustomers`, `reactivations[]` |
 | `movements --json` | `reactivationMrr`, `reactivations[]` |
 | `churn --json` | `reactivatedCustomers` (netted from `customersLost` for same-period) |
-| `new-customers --json` | `reactivatedCount`, `reactivations[]` (filtered from customer list) |
+| `new-customers --json` | `reactivatedCount`, `reactivations[]` |
 | `quick-ratio --json` | `reactivationMrr` (in numerator) |
 
-**Reactivation detail object:**
-```json
-{
-  "customerId": "cus_abc",
-  "previousSubscriptionId": "sub_old",
-  "newSubscriptionId": "sub_new",
-  "canceledAt": "2026-01-15",
-  "reactivatedAt": "2026-03-01",
-  "mrrCents": 2900
-}
-```
-
-## Output Formats
+## Common Patterns
 
 ```bash
-# JSON (for parsing)
-stripe-pulse mrr --json
+# Get a single number
+stripe-pulse mrr --json | jq .mrr
+# → 392
 
-# CSV (for spreadsheets)
+# Check if churn is concerning
+stripe-pulse churn --json | jq '.customerChurnRate > 10'
+
+# Get churned customer emails
+stripe-pulse churned --json | jq -r '.customers[].email'
+
+# Check for reactivations
+stripe-pulse dashboard --json | jq '.reactivatedCustomers'
+
+# Compare two accounts
+stripe-pulse mrr --profile activecalculator --json | jq .mrr
+stripe-pulse mrr --profile teamai --json | jq .mrr
+
+# Diagnose connection issues
+stripe-pulse doctor --json | jq '.checks[] | select(.status == "fail")'
+
+# Export formats
 stripe-pulse active --format csv > customers.csv
-
-# Markdown (for investor updates)
 stripe-pulse dashboard --format markdown
-
-# Chart (MRR trend + movements waterfall)
 stripe-pulse mrr --chart
 ```
+
+## Gotchas
+
+- **Always use `--json` when parsing output** — human output has ANSI colors that break parsing. Piped stdout auto-switches to JSON.
+- **`dashboard --json` is more efficient than individual commands** — one parallel batch vs many sequential calls.
+- **`customers` counts unique customers, `mrr` counts subscriptions** — a customer with 2 subscriptions = 1 customer but 2 in `activeSubscriptions`.
+- **Historical MRR (`--chart`) is approximate** — reconstructed from subscription timestamps using current pricing; doesn't reflect past price changes.
+- **Period defaults to last 30 days** — always pass `--from`/`--to` for specific periods.
+- **Restricted keys show less info** — product names may show as price IDs if product read permission is missing.
+- **MRR breakdown is coupon-aware** — forever-duration discounts distributed proportionally across plan items.
+- **`new-customers` totalMrr vs `movements` newMrr can differ** — `new-customers` counts all subs created in period (including canceled); `movements` only counts currently active ones.
+- **Designed for early-stage SaaS (up to ~10,000 subscriptions)** — under 500 subs: 2-3s; 2,000+ subs: 15-30s; no caching between commands.
 
 ## Exit Codes
 
@@ -173,54 +186,4 @@ stripe-pulse mrr --chart
 | `2` | Auth error (no key, invalid key) |
 | `3` | Validation error (bad date, bad option) |
 
-## Gotchas
-
-- **Always use `--json` when parsing output.** Human output has ANSI colors that break parsing. Piped stdout auto-switches to JSON.
-- **`dashboard --json` is more efficient than individual commands.** One parallel batch vs many sequential calls. Use it when you need 2+ metrics.
-- **`customers` counts unique customers, `mrr` counts subscriptions.** A customer with 2 subscriptions = 1 customer but 2 in `activeSubscriptions`.
-- **Historical MRR (`--chart`) is approximate.** Reconstructed from subscription timestamps using current pricing. Doesn't reflect past price changes.
-- **Period defaults to last 30 days.** Always pass `--from`/`--to` for specific periods.
-- **Restricted keys work but show less info.** Product names may show as price IDs if product read permission is missing.
-- **Benchmark strings only appear in human output.** JSON has raw numbers only — no "⚠ High" or "✓ Good" strings.
-- **MRR breakdown is coupon-aware.** Forever-duration discounts are distributed proportionally across plan items.
-- **`new-customers` totalMrr vs `movements` newMrr can differ.** `new-customers` counts all subs created in period (including already-canceled). `movements` only counts currently active ones.
-- **Designed for early-stage SaaS (up to ~10,000 subscriptions).** Under 500 subs: 2-3 seconds. 2,000+ subs: 15-30 seconds. No caching between commands.
-
-## Common Patterns
-
-### Get a single number
-```bash
-stripe-pulse mrr --json | jq .mrr
-# → 392
-```
-
-### Check if churn is concerning
-```bash
-stripe-pulse churn --json | jq '.customerChurnRate > 10'
-# → true/false
-```
-
-### Get churned customer emails
-```bash
-stripe-pulse churned --json | jq -r '.customers[].email'
-```
-
-### Check for reactivations
-```bash
-stripe-pulse movements --json | jq '.reactivations'
-# → [{ customerId, previousSubscriptionId, newSubscriptionId, canceledAt, reactivatedAt, mrrCents }]
-
-stripe-pulse dashboard --json | jq '.reactivatedCustomers'
-# → 2
-```
-
-### Compare two accounts
-```bash
-stripe-pulse mrr --profile activecalculator --json | jq .mrr
-stripe-pulse mrr --profile teamai --json | jq .mrr
-```
-
-### Diagnose connection issues
-```bash
-stripe-pulse doctor --json | jq '.checks[] | select(.status == "fail")'
-```
+See [reference/mrr-calculation.md](reference/mrr-calculation.md) for MRR methodology, discount handling, tiered pricing, and known divergences from Stripe's dashboard.
